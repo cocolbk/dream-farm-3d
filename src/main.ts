@@ -24,9 +24,33 @@ import {
 } from './staff/staff';
 import { defaultSave, loadSave, writeSave, clearSave, SAVE_KEY, SAVE_VERSION } from './save/save';
 import { toast, confirmDialog } from './ui/hud';
-import { initPWA } from './pwa';
+import { initPWA, installMode, installSteps, triggerInstall } from './pwa';
 
 initPWA();
+
+/** Always-visible install flow: native prompt where available, guided steps elsewhere. */
+function openInstall(): void {
+  const mode = installMode();
+  if (mode === 'installed') {
+    openPanel('Install App', '<div class="row"><span>✅ Already installed — launch Dream Farm from your home screen or apps.</span></div>');
+    return;
+  }
+  const steps = installSteps().map((s) => `<div class="row"><span>${s}</span></div>`).join('');
+  openPanel(
+    'Install App',
+    `<div class="row"><span>📲 Play fullscreen + offline, straight from your home screen. Free, no account.</span></div>`
+    + (mode === 'prompt' ? `<div class="row"><button class="btn primary" id="do-install">📲 Install Dream Farm 3D</button></div>` : '')
+    + `<h4>How to install on this device</h4>` + steps,
+  );
+  const btn = panelBody.querySelector('#do-install') as HTMLButtonElement | null;
+  if (btn) {
+    btn.onclick = async () => {
+      const ok = await triggerInstall();
+      if (!ok) openInstall(); // prompt went away — fall back to steps
+      else openPanel('Install App', '<div class="row"><span>Check your home screen / apps for Dream Farm 3D 🌾</span></div>');
+    };
+  }
+}
 
 // ---------- state ----------
 let eco = new EconomyService(Balance.startCoins);
@@ -1096,6 +1120,7 @@ document.querySelectorAll<HTMLButtonElement>('.crop-pick').forEach((btn) => {
 (document.getElementById('btn-staff') as HTMLButtonElement).onclick = openStaff;
 (document.getElementById('btn-land') as HTMLButtonElement).onclick = openLand;
 (document.getElementById('btn-goals') as HTMLButtonElement).onclick = openGoals;
+(document.getElementById('btn-install-top') as HTMLButtonElement).onclick = openInstall;
 (document.getElementById('btn-dealer') as HTMLButtonElement).onclick = openDealership;
 (document.getElementById('btn-fin') as HTMLButtonElement).onclick = openLedger;
 (document.getElementById('joy-exit') as HTMLButtonElement).onclick = () => {
@@ -1364,6 +1389,15 @@ btnContinue.onclick = () => {
   hud.classList.remove('hidden');
   paused = true;
   (document.getElementById('pause-menu') as HTMLElement).classList.remove('hidden');
+};
+(document.getElementById('btn-install') as HTMLButtonElement).onclick = async () => {
+  // On the menu the HUD panel isn't visible yet: fire the native prompt when
+  // available, otherwise point at the in-game 📲 panel with full steps.
+  if (await triggerInstall()) return;
+  const hint = installMode() === 'ios'
+    ? 'iPhone: Safari Share → Add to Home Screen'
+    : 'Browser menu → Install app (full steps in the in-game 📲 panel)';
+  toast(`📲 ${hint}`);
 };
 const pauseMenu = document.getElementById('pause-menu') as HTMLElement;
 (document.getElementById('btn-pause') as HTMLButtonElement).onclick = () => { paused = true; pauseMenu.classList.remove('hidden'); };
