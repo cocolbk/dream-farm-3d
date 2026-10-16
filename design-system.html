@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dream Farm 3D — Design System</title>
+<style>
+:root { --bg:#1e2a32; --card:#fff; --accent:#4caf50; --warn:#ff9800; --danger:#e53935; --coin:#ffc93c; --cream:#fff6e9; }
+* { box-sizing:border-box; }
+body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:#f2f0e8; color:#222; }
+header { background:var(--bg); color:#fff; padding:16px 24px; }
+header h1 { margin:0; font-size:22px; }
+header p { margin:4px 0 0; color:#cdeac0; font-size:14px; }
+.wrap { max-width:960px; margin:0 auto; padding:24px; display:flex; flex-direction:column; gap:24px; }
+section.card { background:var(--card); border-radius:12px; padding:20px; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+h2 { margin:0 0 4px; font-size:18px; }
+.sub { color:#666; font-size:13px; margin-bottom:12px; }
+.swatches { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px; }
+.sw { border-radius:8px; overflow:hidden; border:1px solid #ddd; }
+.sw .c { height:56px; }
+.sw .t { padding:6px 8px; font-size:12px; }
+.btn { min-height:44px; min-width:44px; padding:10px 18px; margin:4px; border-radius:8px; border:1px solid #ccc; font-size:16px; cursor:pointer; background:#fff; }
+.btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+.btn.danger { background:var(--danger); color:#fff; border-color:var(--danger); }
+.btn.small { padding:6px 12px; }
+.btn:disabled { opacity:.5; }
+.mock-topbar { display:flex; gap:12px; align-items:center; background:var(--bg); color:#fff; padding:8px 12px; border-radius:8px; font-size:14px; }
+.mock-toolbar { display:flex; gap:8px; padding:10px; background:rgba(30,42,50,.9); border-radius:8px; }
+.tool { min-height:44px; flex:1; border-radius:8px; border:1px solid #555; background:#fff; font-size:15px; }
+.tool.active { outline:3px solid var(--accent); }
+.toast { background:var(--bg); color:#fff; padding:8px 12px; border-radius:8px; font-size:14px; display:inline-block; margin:4px; }
+.toast.error { background:var(--danger); }
+.row { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #eee; }
+.type div { margin:6px 0; }
+</style>
+</head>
+<body>
+<header><h1>🌾 Dream Farm 3D — Design System v1</h1><p>Cozy low-poly diorama · system fonts · 44px touch targets · icon + text statuses (never color-only)</p></header>
+<div class="wrap">
+<section class="card"><h2>1 · Palette (3D world + UI share these)</h2><div class="sub">All Three.js materials reference these hex values — <code>src/core/Config.ts → Palette</code>. No textures in MVP.</div>
+<div class="swatches">
+<div class="sw"><div class="c" style="background:#7EC850"></div><div class="t">grass #7EC850</div></div>
+<div class="sw"><div class="c" style="background:#5DA93C"></div><div class="t">grassDark #5DA93C</div></div>
+<div class="sw"><div class="c" style="background:#D9B382"></div><div class="t">path #D9B382</div></div>
+<div class="sw"><div class="c" style="background:#8A5A33"></div><div class="t">soilTilled #8A5A33</div></div>
+<div class="sw"><div class="c" style="background:#6E4426"></div><div class="t">soilDry #6E4426</div></div>
+<div class="sw"><div class="c" style="background:#A67C52"></div><div class="t">wood #A67C52</div></div>
+<div class="sw"><div class="c" style="background:#C94F4F"></div><div class="t">barnRed #C94F4F</div></div>
+<div class="sw"><div class="c" style="background:#7A4A3A"></div><div class="t">roof #7A4A3A</div></div>
+<div class="sw"><div class="c" style="background:#FFF6E9"></div><div class="t">cream #FFF6E9</div></div>
+<div class="sw"><div class="c" style="background:#5BC0EB"></div><div class="t">water #5BC0EB</div></div>
+<div class="sw"><div class="c" style="background:#FFC93C"></div><div class="t">maize/coin #FFC93C</div></div>
+<div class="sw"><div class="c" style="background:#3E9B4F"></div><div class="t">stalk #3E9B4F</div></div>
+<div class="sw"><div class="c" style="background:#E94F37"></div><div class="t">tomato #E94F37</div></div>
+<div class="sw"><div class="c" style="background:#F08A24"></div><div class="t">carrot #F08A24</div></div>
+<div class="sw"><div class="c" style="background:#1E2A32"></div><div class="t" style="color:#fff;background:#1E2A32">HUD bg #1E2A32</div></div>
+<div class="sw"><div class="c" style="background:#4CAF50"></div><div class="t">accent #4CAF50</div></div>
+</div></section>
+<section class="card"><h2>2 · Typography</h2><div class="sub">System stack only (no webfont download). HUD ≥14px, body 16px.</div>
+<div class="type"><div style="font-size:22px;font-weight:700">Heading — Farm Shop (22px bold)</div><div style="font-size:16px">Body — Sell 4 maize for 32 coins (16px)</div><div style="font-size:14px">HUD — 🪙 200 · Objective: plant a crop (14px)</div><div style="font-size:13px;color:#666">Meta — range 4–14 · owned 1 (13px)</div></div></section>
+<section class="card"><h2>3 · Buttons</h2><div class="sub">All ≥44px, :active scale, disabled with reason.</div>
+<button class="btn primary">New Game</button><button class="btn">Settings</button><button class="btn danger">Reset save</button><button class="btn small">🌱 Seeds</button><button class="btn small" disabled>Buy (need 300🪙)</button></section>
+<section class="card"><h2>4 · HUD: topbar + toolbar + cropbar</h2><div class="sub">Exactly as rendered in-game (bottom thumb zone on mobile).</div>
+<div class="mock-topbar"><span style="color:var(--coin);font-weight:700">🪙 200</span><span style="flex:1">Objective: plant a crop</span><span style="color:#4CAF50">●</span><button class="btn small">II</button></div><br>
+<div style="display:flex;gap:8px;justify-content:center"><button class="btn">🌽 Maize</button><button class="btn">🥕 Carrot</button><button class="btn">🍅 Tomato</button></div><br>
+<div class="mock-toolbar"><button class="tool active">🌱 Plant</button><button class="tool">💧 Water</button><button class="tool">🧺 Harvest</button><button class="tool">🚜 Till</button><button class="tool">🕹️ Drive</button><button class="tool">🏠 Build</button></div></section>
+<section class="card"><h2>5 · Panels, toasts, feedback language</h2><div class="sub">One panel at a time on mobile (bottom-sheet). Toast success vs error-shake.</div>
+<div class="row"><span>🌱 Maize — 10🪙 (have 5)</span><button class="btn small">Buy</button></div>
+<div class="row"><span>Farm Shop stock: maize 4 @ 8🪙</span><button class="btn small">Sell 1</button></div><br>
+<span class="toast">+3 maize harvested</span><span class="toast">🚜 plot 4 cultivated</span><span class="toast error">Not enough coins</span></section>
+<section class="card"><h2>6 · 3D visual language</h2><div class="sub">Flat-shaded primitives, shared materials, hemisphere + 1 directional shadow light, fog. Plot states: empty (grass/tilled soil) → planted (sprout) → growing (bush) → ready (full + produce) + always a text label, never color-only.</div>
+<div class="row"><span>🌱 planted — sprout 0.4m</span><span>sprout + "planted 0%"</span></div>
+<div class="row"><span>🌿 growing — bush 0.9m</span><span>bush + "growing 54%"</span></div>
+<div class="row"><span>🌽 ready — full 1.4m + cobs/tomatoes/roots</span><span>full + "READY"</span></div>
+<div class="row"><span>🚜 tractor — red body, cream cabin, 4 wheels, till bar</span><span>selection ring when active</span></div>
+<div class="row"><span>🏠 ghost preview — green valid / red invalid</span><span>+ reason text</span></div></section>
+</div>
+</body>
+</html>

@@ -71,4 +71,14 @@ export const Balance = {
   startSeeds: { maize: 5, tomato: 0, carrot: 5 } as Record<CropId, number>,
   confirmThreshold: 100,
   farmBounds: 38, // half-size of owned land square
+  // Phase 3 — customer vehicles (P0)
+  parkingBays: 4,
+  driveQueueSlots: 3,
+  maxCustomers: 4,
+  spawnMin: 20, // seconds
+  spawnMax: 35,
+  shopWait: 8, // s parked before checkout attempt
+  serveTimeout: 45, // s before unserved customer leaves
+  driveAutoServe: 12, // s before drive-through auto-handoff (pre-staff fallback)
+  vehicleSpeed: 5, // m/s
 } as const;

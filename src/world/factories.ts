@@ -107,3 +107,29 @@ export function buildTractorMesh(): THREE.Group {
   g.add(bar);
   return g;
 }
+
+export type CustomerVehicleKind = 'car' | 'van' | 'pickup';
+
+// Low-poly customer vehicles: body + cabin + wheels. Kind changes size/color.
+export function buildCustomerVehicleMesh(kind: CustomerVehicleKind): THREE.Group {
+  const colors = { car: 0x5b8dd9, van: 0x66bb6a, pickup: 0xef9e3a } as const;
+  const sizes = { car: [1.6, 0.7, 3.0], van: [1.8, 1.1, 3.6], pickup: [1.7, 0.8, 3.4] } as const;
+  const [w, h, l] = sizes[kind];
+  const g = new THREE.Group();
+  const body = box(w, h, l, colors[kind]);
+  body.position.y = 0.55 + h / 2;
+  g.add(body);
+  const cabin = box(w * 0.85, 0.6, l * 0.4, Palette.cream);
+  cabin.position.set(0, 0.55 + h + 0.3, -l * 0.05);
+  g.add(cabin);
+  const wheelG = new THREE.CylinderGeometry(0.35, 0.35, 0.3, 10);
+  wheelG.rotateZ(Math.PI / 2);
+  const wheelM = mat(0x2b2b2b);
+  for (const [x, z] of [[-w / 2, l / 3], [w / 2, l / 3], [-w / 2, -l / 3], [w / 2, -l / 3]] as Array<[number, number]>) {
+    const wh = new THREE.Mesh(wheelG, wheelM);
+    wh.position.set(x, 0.35, z);
+    wh.castShadow = true;
+    g.add(wh);
+  }
+  return g;
+}

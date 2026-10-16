@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import './styles.css';
 import { buildWorld } from './world/scene';
 import { createCameraRig } from './world/cameraRig';
-import { buildCropMesh, buildBuildingMesh, buildTractorMesh } from './world/factories';
+import { buildCropMesh, buildBuildingMesh, buildTractorMesh, buildCustomerVehicleMesh, type CustomerVehicleKind } from './world/factories';
+import { buildRoads } from './world/roads';
 import { mat } from './world/materials';
 import { Balance, CROPS, BUILDINGS, TRACTORS, Palette, type CropId } from './core/Config';
 import { bus } from './core/EventBus';
@@ -12,6 +13,10 @@ import { createPlots, plant, water, tickPlot, harvest, till, type Plot } from '.
 import { validatePlacement, type PlacedBuilding } from './buildings/placement';
 import { ShopService } from './shop/shop';
 import { canBuyTractor, createTractor, driveStep, type TractorInstance } from './vehicles/tractor';
+import {
+  ReservationManager, generateRequest, checkPurchase, orderTotal, spawnCustomer,
+  moveAlong, exitWaypoints, mulberry32, type Customer,
+} from './customers/customers';
 import { defaultSave, loadSave, writeSave, clearSave, SAVE_KEY, SAVE_VERSION } from './save/save';
 import { toast, confirmDialog } from './ui/hud';
 
@@ -33,6 +38,15 @@ let driving = false;
 let followCam = true;
 let saveTimer: number | undefined;
 
+// Phase 3 — customer vehicles (transient: never saved, PRD §6)
+let customers: Customer[] = [];
+const customerMeshes = new Map<string, THREE.Group>();
+const customerKinds = new Map<string, CustomerVehicleKind>();
+const resv = new ReservationManager();
+let rng = mulberry32(Date.now() % 100000);
+let spawnTimer = 8; // first visitor arrives soon after game start
+let customerSeq = 0;
+
 const OBJECTIVES = [
   'Objective 1/5: 🌱 Plant a crop (select Plant, tap a plot)',
   'Objective 2/5: 💧 Water the crop',
@@ -51,6 +65,7 @@ const scene = new THREE.Scene();
 const { controls } = createCameraRig(canvas);
 const camera = (controls as unknown as { object: THREE.Camera }).object as THREE.PerspectiveCamera;
 const { interactables } = buildWorld(scene);
+buildRoads(scene);
 
 // plot meshes + crop visuals
 const plotMeshes: THREE.Mesh[] = [];
@@ -142,7 +157,7 @@ const promptEl = document.getElementById('prompt') as HTMLElement;
 const joystickEl = document.getElementById('joystick') as HTMLElement;
 function refreshHUD(): void {
   coinsEl.textContent = `🪙 ${eco.balance}`;
-  seedsQuick.textContent = `🌽${inv.seeds.maize} 🥕${inv.seeds.carrot} 🍅${inv.seeds.tomato} | 🧺${inv.produce.maize + inv.produce.carrot + inv.produce.tomato} | 🏪${shop.stock.maize + shop.stock.tomato + shop.stock.carrot} | 🚜${tractors.length}`;
+  seedsQuick.textContent = `🌽${inv.seeds.maize} 🥕${inv.seeds.carrot} 🍅${inv.seeds.tomato} | 🧺${inv.produce.maize + inv.produce.carrot + inv.produce.tomato} | 🏪${shop.stock.maize + shop.stock.tomato + shop.stock.carrot} | 🚜${tractors.length} | 🚗${customers.length}`;
   objectiveEl.textContent = OBJECTIVES[Math.min(tutorialStep, OBJECTIVES.length - 1)];
 }
 function showPrompt(msg: string): void {
@@ -208,6 +223,7 @@ function applySave(data: ReturnType<typeof loadSave>): void {
   buildingGroup.clear();
   buildings.forEach(renderBuilding);
   renderTractors();
+  clearCustomers(); // vehicles are transient — never restored from save (§6)
   plots.forEach((_, i) => refreshPlotVisual(i));
   refreshHUD();
 }
@@ -356,6 +372,219 @@ function openDealership(): void {
     };
   });
 }
+// ---------- Phase 3: customer vehicles ----------
+const KIND_ICON: Record<CustomerVehicleKind, string> = { car: '🚗', van: '🚐', pickup: '🛻' };
+
+function renderCustomerMesh(c: Customer): void {
+  const old = customerMeshes.get(c.id);
+  if (old) scene.remove(old);
+  const kind = customerKinds.get(c.id) ?? 'car';
+  const g = buildCustomerVehicleMesh(kind);
+  g.position.set(c.x, 0, c.z);
+  g.userData.customerId = c.id;
+  scene.add(g);
+  customerMeshes.set(c.id, g);
+}
+
+function removeCustomerMesh(id: string): void {
+  const m = customerMeshes.get(id);
+  if (m) scene.remove(m);
+  customerMeshes.delete(id);
+  customerKinds.delete(id);
+}
+
+function faceDirection(c: Customer): void {
+  const m = customerMeshes.get(c.id);
+  const wp = c.waypoints[c.wpIndex];
+  if (!m || !wp) return;
+  m.rotation.y = Math.atan2(wp.x - c.x, wp.z - c.z);
+}
+
+/** Atomic checkout shared by in-store auto-serve, drive-through handoff and tests. */
+function checkoutCustomer(c: Customer): boolean {
+  const chk = checkPurchase(c.items, c.budget, shop.stock, shop.prices);
+  if (!chk.ok) {
+    c.reason = chk.reason ?? 'Blocked';
+    return false;
+  }
+  for (const it of c.items) {
+    const s = shop.commitSale(it.crop, it.qty);
+    if (!s.ok) { c.reason = s.reason ?? 'Blocked'; return false; } // stock changed mid-commit
+  }
+  eco.transact(chk.total!, `shop sale ${c.mode} ${c.id}`);
+  bus.emit({ type: 'sale:completed', qty: c.items.reduce((a, it) => a + it.qty, 0), revenue: chk.total! });
+  beep(true);
+  toast(`${KIND_ICON[customerKinds.get(c.id) ?? 'car']} ${c.mode === 'instore' ? 'In-store' : 'Drive-through'} sale +${chk.total}🪙`);
+  return true;
+}
+
+function releaseSlot(c: Customer): void {
+  if (c.slot < 0) return;
+  if (c.mode === 'instore') resv.releaseBay(c.slot);
+  else resv.releaseQueue(c.slot);
+  c.slot = -1;
+}
+
+function sendLeaving(c: Customer, reason: string): void {
+  c.reason = reason;
+  c.state = 'leaving';
+  c.waypoints = exitWaypoints();
+  c.wpIndex = 0;
+  releaseSlot(c); // free the slot before the exit drive (reserved before moving, §6)
+}
+
+function spawnTick(dt: number): void {
+  spawnTimer -= dt;
+  if (spawnTimer > 0) return;
+  spawnTimer = Balance.spawnMin + rng() * (Balance.spawnMax - Balance.spawnMin);
+  const active = customers.filter((c) => c.state !== 'gone').length;
+  if (active >= Balance.maxCustomers) return;
+  const mode = rng() < 0.5 ? 'instore' : 'drive';
+  const slot = mode === 'instore' ? resv.reserveBay() : resv.reserveQueue();
+  if (slot === -1) return; // no parking/queue capacity — vehicle doesn't enter (§6)
+  customerSeq += 1;
+  const id = `v${customerSeq}`;
+  const kinds: CustomerVehicleKind[] = ['car', 'van', 'pickup'];
+  customerKinds.set(id, kinds[Math.floor(rng() * kinds.length)]);
+  const req = generateRequest(rng, shop.stock, shop.prices);
+  const c = spawnCustomer(id, mode, slot, req);
+  c.state = 'toSlot';
+  c.reason = mode === 'instore' ? 'Arriving — finding parking' : 'Arriving — joining queue';
+  customers.push(c);
+  renderCustomerMesh(c);
+  refreshHUD();
+}
+
+/** 10Hz sim-tick portion: spawns + wait timers + checkout attempts. */
+function customersTick(dt: number): void {
+  spawnTick(dt);
+  let panelDirty = false;
+  for (const c of customers) {
+    if (c.state === 'parked' || c.state === 'shopping' || c.state === 'queued' || c.state === 'ordering') {
+      c.wait += dt;
+      if (c.state === 'parked' && c.wait >= Balance.shopWait) {
+        c.state = 'shopping';
+        c.reason = 'Shopping…';
+      }
+      if (c.state === 'shopping') {
+        if (checkoutCustomer(c)) {
+          sendLeaving(c, 'Served — thank you!');
+        } else if (c.wait >= Balance.serveTimeout) {
+          sendLeaving(c, `Left: ${c.reason}`);
+          toast(`Customer left: ${c.reason}`, 'error');
+        }
+        panelDirty = true;
+      }
+      if (c.state === 'queued') {
+        c.state = 'ordering';
+        c.reason = 'Ordering — Serve in 🚗 panel';
+        panelDirty = true;
+      }
+      if (c.state === 'ordering') {
+        if (c.wait >= Balance.driveAutoServe) {
+          // pre-staff fallback: player handoff, auto after timeout so the lane never jams
+          if (checkoutCustomer(c)) sendLeaving(c, 'Served — thank you!');
+          else if (c.wait >= Balance.serveTimeout) {
+            sendLeaving(c, `Left: ${c.reason}`);
+            toast(`Drive-through left: ${c.reason}`, 'error');
+          }
+          panelDirty = true;
+        } else if (c.wait >= Balance.serveTimeout) {
+          sendLeaving(c, `Left: waited too long`);
+          panelDirty = true;
+        }
+      }
+    }
+  }
+  if (panelDirty) {
+    refreshHUD();
+    if (panelTitle.textContent === 'Customers & Queue') openCustomers();
+  }
+}
+
+/** Frame-rate portion: smooth vehicle movement + arrival transitions. */
+function customersFrame(dt: number): void {
+  for (const c of customers) {
+    if (c.state === 'toSlot' || c.state === 'leaving') {
+      faceDirection(c);
+      if (moveAlong(c, dt)) {
+        const m = customerMeshes.get(c.id);
+        if (c.state === 'toSlot') {
+          if (c.mode === 'instore') {
+            c.state = 'parked';
+            c.reason = 'Parked — shopping';
+          } else {
+            c.state = 'queued';
+            c.reason = 'In queue';
+          }
+          c.wait = 0;
+          if (panelTitle.textContent === 'Customers & Queue') openCustomers();
+        } else {
+          c.state = 'gone';
+          removeCustomerMesh(c.id);
+        }
+        refreshHUD();
+        void m;
+      } else {
+        const m = customerMeshes.get(c.id);
+        if (m) m.position.set(c.x, 0, c.z);
+      }
+    }
+  }
+  customers = customers.filter((c) => c.state !== 'gone');
+}
+
+function stateBadge(c: Customer): string {
+  const cls = c.state === 'leaving' || c.state === 'gone' ? 'out'
+    : c.state === 'shopping' || c.state === 'ordering' ? 'wait' : '';
+  const label = c.state === 'toSlot' ? 'arriving' : c.state;
+  return `<span class="state ${cls}">● ${label}</span>`;
+}
+
+function openCustomers(): void {
+  const queued = customers.filter((c) => c.mode === 'drive' && c.state !== 'leaving' && c.state !== 'gone').length;
+  const parked = resv.bays.filter(Boolean).length;
+  let html = `<div class="row"><span>🅿️ Parking ${parked}/${Balance.parkingBays} · 🚗 Queue ${queued}/${Balance.driveQueueSlots}</span></div>`;
+  if (customers.length === 0) html += '<p>No visitors yet — stock the 🏪 shop and they will come.</p>';
+  for (const c of customers) {
+    const total = orderTotal(c.items, shop.prices);
+    const list = c.items.map((it) => `${it.qty}x ${it.crop}`).join(', ');
+    const canServe = c.state === 'shopping' || c.state === 'ordering' || c.state === 'parked' || c.state === 'queued';
+    html += `<div class="row"><span>${KIND_ICON[customerKinds.get(c.id) ?? 'car']} ${c.mode === 'instore' ? '🏪' : '🚗'} ${list} = ${total}🪙 (budget ${c.budget})<br><small>${c.reason}</small></span><span>${stateBadge(c)}${canServe ? ` <button class="btn small" data-serve="${c.id}">Serve</button>` : ''}</span></div>`;
+  }
+  openPanel('Customers & Queue', html);
+  panelBody.querySelectorAll<HTMLButtonElement>('[data-serve]').forEach((b) => {
+    b.onclick = () => serveCustomer(b.dataset.serve!);
+  });
+}
+
+/** Player handoff for drive-through orders (Phase 4 staff will call the same path). */
+function serveCustomer(id: string): void {
+  const c = customers.find((x) => x.id === id);
+  if (!c) return;
+  if (c.state === 'leaving' || c.state === 'gone' || c.state === 'served') {
+    toast('Already on the way out', 'error');
+    return;
+  }
+  if (checkoutCustomer(c)) {
+    sendLeaving(c, 'Served — thank you!');
+  } else {
+    toast(c.reason, 'error');
+    beep(false);
+  }
+  refreshHUD();
+  openCustomers();
+}
+
+function clearCustomers(): void {
+  for (const c of customers) removeCustomerMesh(c.id);
+  customers = [];
+  customerKinds.clear();
+  resv.bays.fill(false);
+  resv.queue.fill(false);
+  spawnTimer = 8;
+}
+
 function categoryOf(reason: string): string {
   if (reason.startsWith('sale') || reason.startsWith('shop sale')) return 'Sales';
   if (reason.startsWith('seed')) return 'Seeds';
@@ -424,6 +653,7 @@ document.querySelectorAll<HTMLButtonElement>('.crop-pick').forEach((btn) => {
 (document.getElementById('btn-shop') as HTMLButtonElement).onclick = openSeedShop;
 (document.getElementById('btn-storage') as HTMLButtonElement).onclick = openStorage;
 (document.getElementById('btn-farmshop') as HTMLButtonElement).onclick = openFarmShop;
+(document.getElementById('btn-customers') as HTMLButtonElement).onclick = openCustomers;
 (document.getElementById('btn-dealer') as HTMLButtonElement).onclick = openDealership;
 (document.getElementById('btn-fin') as HTMLButtonElement).onclick = openLedger;
 (document.getElementById('joy-exit') as HTMLButtonElement).onclick = () => {
@@ -548,6 +778,12 @@ function pick(clientX: number, clientY: number): void {
       return;
     }
   }
+  // customer vehicle tap -> open queue panel
+  const vHits = raycaster.intersectObjects([...customerMeshes.values()], true);
+  if (vHits.length > 0) {
+    openCustomers();
+    return;
+  }
   // plots
   const hits = raycaster.intersectObjects(plotMeshes, false);
   if (hits.length > 0 && tool !== 'build') {
@@ -615,6 +851,7 @@ function startGame(fresh: boolean): void {
     driving = false;
     buildingGroup.clear();
     renderTractors();
+    clearCustomers();
     plots.forEach((_, i) => refreshPlotVisual(i));
   }
   menu.classList.add('hidden');
@@ -670,7 +907,7 @@ function animate(now: number): void {
   if (paused || hud.classList.contains('hidden')) return;
   const dtFrame = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
-  // drive at frame rate for smoothness
+  // player tractor drive at frame rate for smoothness
   const t = selectedTractor();
   if (driving && t && tool === 'drive') {
     const { throttle, steer } = driveInput();
@@ -685,9 +922,11 @@ function animate(now: number): void {
   } else {
     controls.enabled = true;
   }
+  customersFrame(dtFrame);
   if (now - lastTick >= 100) {
     const dt = (now - lastTick) / 1000;
     lastTick = now;
+    customersTick(dt);
     let grown = false;
     for (let i = 0; i < plots.length; i++) {
       const before = plots[i].state;

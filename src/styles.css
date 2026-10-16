@@ -51,6 +51,9 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Se
 #joystick .btn { background: #fff; }
 .price-ctl { display: flex; gap: 4px; align-items: center; }
 .price-ctl .btn { padding: 6px 10px; }
+.state { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #e3f2e3; border: 1px solid #4caf50; }
+.state.wait { background: #fff3e0; border-color: var(--warn); }
+.state.out { background: #ffebee; border-color: var(--danger); }
 @media (max-width: 768px) {
   .tool { flex: 1; }
   #panel { left: 12px; right: 12px; top: auto; bottom: 140px; width: auto; }
