@@ -46,11 +46,23 @@ export interface BuildingDef {
   size: [number, number]; // w,d in meters
 }
 
+export interface TractorDef {
+  id: string;
+  name: string;
+  price: number;
+  speed: number; // m/s
+  capability: string;
+}
+
 export const BUILDINGS: Record<string, BuildingDef> = {
   shop: { id: 'shop', name: 'Farm Shop', cost: 150, size: [6, 5] },
   barn: { id: 'barn', name: 'Barn', cost: 120, size: [5, 4] },
   fence: { id: 'fence', name: 'Fence (1m)', cost: 5, size: [1, 0.3] },
   path: { id: 'path', name: 'Path (1m)', cost: 2, size: [1, 1] },
+};
+
+export const TRACTORS: Record<string, TractorDef> = {
+  t20: { id: 't20', name: 'Fieldhand T-20', price: 300, speed: 6, capability: 'Cultivates fields' },
 };
 
 export const Balance = {

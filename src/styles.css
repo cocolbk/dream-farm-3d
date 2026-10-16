@@ -47,6 +47,10 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Se
 .qty { display: flex; gap: 6px; align-items: center; }
 #seeds-quick { color: #cdeac0; font-size: 13px; }
 #pause-menu .menu-card { display: flex; flex-direction: column; gap: 10px; }
+#joystick { position: absolute; bottom: 84px; left: 12px; display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: auto; background: rgba(30,42,50,.7); padding: 8px; border-radius: 12px; }
+#joystick .btn { background: #fff; }
+.price-ctl { display: flex; gap: 4px; align-items: center; }
+.price-ctl .btn { padding: 6px 10px; }
 @media (max-width: 768px) {
   .tool { flex: 1; }
   #panel { left: 12px; right: 12px; top: auto; bottom: 140px; width: auto; }

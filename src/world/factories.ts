@@ -82,3 +82,28 @@ export function buildBuildingMesh(defId: string): THREE.Group {
   }
   return g;
 }
+
+export function buildTractorMesh(): THREE.Group {
+  const g = new THREE.Group();
+  const body = box(1.6, 0.9, 2.6, Palette.barnRed);
+  body.position.y = 0.9;
+  g.add(body);
+  const cabin = box(1.3, 1.1, 1.2, Palette.cream);
+  cabin.position.set(0, 1.9, -0.5);
+  g.add(cabin);
+  const wheelG = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 12);
+  wheelG.rotateZ(Math.PI / 2);
+  const wheelM = mat(0x333333);
+  const wheels: Array<[number, number, number]> = [[-0.9, 0.45, 0.9], [0.9, 0.45, 0.9], [-0.9, 0.55, -0.9], [0.9, 0.55, -0.9]];
+  for (const [x, y, z] of wheels) {
+    const w = new THREE.Mesh(wheelG, wheelM);
+    w.position.set(x, y, z);
+    w.castShadow = true;
+    g.add(w);
+  }
+  // cultivator bar at back (visual cue for cultivate action)
+  const bar = box(2.0, 0.15, 0.3, Palette.wood);
+  bar.position.set(0, 0.4, -1.6);
+  g.add(bar);
+  return g;
+}

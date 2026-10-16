@@ -4,9 +4,9 @@ Cozy 3D farming / building / shop sim (browser-first). See `Dream_Farm_3D_PRD (1
 
 ## Status
 
-- [x] Phase 0 — scaffold + diorama + UI shell (current)
-- [ ] Phase 1 — playable foundation (plant/water/harvest, coins, build, save)
-- [ ] Phase 2 — tractor + shop
+- [x] Phase 0 — scaffold + diorama + UI shell
+- [x] Phase 1 — playable foundation (plant/water/harvest, coins, build, save)
+- [x] Phase 2 — tractor + shop (current)
 - [ ] Phase 3 — customer vehicles
 - [ ] Phase 4 — staff + service
 - [ ] Phase 5 — expansion + polish

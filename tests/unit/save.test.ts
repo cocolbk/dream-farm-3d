@@ -14,12 +14,31 @@ function memStorage(): Storage {
 }
 
 describe('save', () => {
-  it('round-trips', () => {
+  it('round-trips v2 with tractors/stock/prices', () => {
     const s = memStorage();
     const d = defaultSave();
     d.coins = 999;
+    d.tractors = [{ uid: 't1', defId: 't20', x: 5, z: 5, angle: 0 }];
+    d.shopStock = { maize: 4, tomato: 0, carrot: 0 };
     writeSave(s, d);
-    expect(loadSave(s)?.coins).toBe(999);
+    const loaded = loadSave(s);
+    expect(loaded?.coins).toBe(999);
+    expect(loaded?.tractors.length).toBe(1);
+    expect(loaded?.shopStock.maize).toBe(4);
+  });
+  it('migrates v1 -> v2 (plots default tilled, empty tractors/shop)', () => {
+    const s = memStorage();
+    s.setItem(SAVE_KEY, JSON.stringify({
+      version: 1, coins: 200,
+      seeds: { maize: 5, tomato: 0, carrot: 5 },
+      produce: { maize: 0, tomato: 0, carrot: 0 },
+      plots: [{ index: 0, state: 'empty', crop: null, progress: 0, water: 0, growthTime: 0 }],
+      buildings: [], tutorialStep: 0,
+    }));
+    const loaded = loadSave(s);
+    expect(loaded?.version).toBe(2);
+    expect(loaded?.plots[0].tilled).toBe(true);
+    expect(loaded?.tractors).toEqual([]);
   });
   it('corrupt save returns null, never throws', () => {
     const s = memStorage();
