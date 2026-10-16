@@ -24,6 +24,9 @@ import {
 } from './staff/staff';
 import { defaultSave, loadSave, writeSave, clearSave, SAVE_KEY, SAVE_VERSION } from './save/save';
 import { toast, confirmDialog } from './ui/hud';
+import { initPWA } from './pwa';
+
+initPWA();
 
 // ---------- state ----------
 let eco = new EconomyService(Balance.startCoins);
