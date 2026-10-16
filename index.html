@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#1E2A32" />
+    <title>Dream Farm 3D</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+      <div id="main-menu" class="overlay">
+        <div class="menu-card">
+          <h1>🌾 Dream Farm 3D</h1>
+          <p class="subtitle">Phase 0 — boot scene + UI shell</p>
+          <button id="btn-continue" class="btn primary" disabled>Continue (no save yet)</button>
+          <button id="btn-new" class="btn primary">New Game</button>
+          <button id="btn-settings" class="btn">Settings</button>
+        </div>
+      </div>
+      <div id="hud" class="hidden">
+        <div id="topbar">
+          <span id="coins">🪙 200</span>
+          <span id="objective">Objective: explore the farm</span>
+          <span id="save-dot" title="save status">●</span>
+          <button id="btn-pause" class="btn small">II</button>
+        </div>
+        <div id="prompt" class="hidden"></div>
+        <div id="toolbar">
+          <button class="tool" data-tool="plant">🌱 Plant</button>
+          <button class="tool" data-tool="water">💧 Water</button>
+          <button class="tool" data-tool="harvest">🧺 Harvest</button>
+          <button class="tool" data-tool="build">🏠 Build</button>
+          <button class="tool" data-tool="interact">✋ Interact</button>
+        </div>
+        <div id="pause-menu" class="overlay hidden">
+          <div class="menu-card">
+            <h2>Paused</h2>
+            <button id="btn-resume" class="btn primary">Resume</button>
+            <button id="btn-reset" class="btn danger">Reset save</button>
+          </div>
+        </div>
+        <div id="toasts" aria-live="polite"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
