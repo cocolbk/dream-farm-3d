@@ -34,4 +34,21 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Se
 .tool.active { outline: 3px solid var(--accent); }
 #toasts { position: absolute; top: 56px; right: 12px; display: flex; flex-direction: column; gap: 8px; }
 .toast { background: var(--bg); color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 14px; }
-@media (max-width: 768px) { .tool { flex: 1; } }
+.toast.error { background: var(--danger); }
+.shake { animation: shake .3s; }
+@keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+#cropbar { position: absolute; bottom: 76px; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; pointer-events: auto; }
+.crop-pick { min-height: 44px; padding: 8px 14px; border-radius: 8px; border: 2px solid transparent; background: #fff; font-size: 15px; }
+.crop-pick.active { border-color: var(--accent); }
+#panel { position: absolute; right: 12px; top: 56px; width: 320px; max-width: 92vw; max-height: 70vh; overflow: auto; background: var(--card); color: #222; border-radius: 12px; padding: 12px; pointer-events: auto; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-weight: 700; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; }
+.row:last-child { border-bottom: none; }
+.qty { display: flex; gap: 6px; align-items: center; }
+#seeds-quick { color: #cdeac0; font-size: 13px; }
+#pause-menu .menu-card { display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 768px) {
+  .tool { flex: 1; }
+  #panel { left: 12px; right: 12px; top: auto; bottom: 140px; width: auto; }
+  #seeds-quick { display: none; }
+}

@@ -12,20 +12,29 @@
       <div id="main-menu" class="overlay">
         <div class="menu-card">
           <h1>🌾 Dream Farm 3D</h1>
-          <p class="subtitle">Phase 0 — boot scene + UI shell</p>
-          <button id="btn-continue" class="btn primary" disabled>Continue (no save yet)</button>
+          <p class="subtitle">Cozy farm sim — Phase 1 playable foundation</p>
+          <button id="btn-continue" class="btn primary" disabled>Continue</button>
           <button id="btn-new" class="btn primary">New Game</button>
-          <button id="btn-settings" class="btn">Settings</button>
+          <button id="btn-settings-menu" class="btn">Settings</button>
         </div>
       </div>
       <div id="hud" class="hidden">
         <div id="topbar">
           <span id="coins">🪙 200</span>
-          <span id="objective">Objective: explore the farm</span>
-          <span id="save-dot" title="save status">●</span>
+          <span id="seeds-quick"></span>
+          <span id="objective">Objective: plant a crop</span>
+          <span id="save-dot" title="saved">●</span>
+          <button id="btn-shop" class="btn small">🌱 Seeds</button>
+          <button id="btn-storage" class="btn small">🧺 Storage</button>
+          <button id="btn-fin" class="btn small">💰 Ledger</button>
           <button id="btn-pause" class="btn small">II</button>
         </div>
         <div id="prompt" class="hidden"></div>
+        <div id="cropbar" class="hidden">
+          <button class="crop-pick" data-crop="maize">🌽 Maize</button>
+          <button class="crop-pick" data-crop="carrot">🥕 Carrot</button>
+          <button class="crop-pick" data-crop="tomato">🍅 Tomato</button>
+        </div>
         <div id="toolbar">
           <button class="tool" data-tool="plant">🌱 Plant</button>
           <button class="tool" data-tool="water">💧 Water</button>
@@ -33,11 +42,37 @@
           <button class="tool" data-tool="build">🏠 Build</button>
           <button class="tool" data-tool="interact">✋ Interact</button>
         </div>
+        <div id="panel" class="hidden">
+          <div class="panel-head">
+            <span id="panel-title">Panel</span>
+            <button id="panel-close" class="btn small">✕</button>
+          </div>
+          <div id="panel-body"></div>
+        </div>
         <div id="pause-menu" class="overlay hidden">
           <div class="menu-card">
             <h2>Paused</h2>
-            <button id="btn-resume" class="btn primary">Resume</button>
-            <button id="btn-reset" class="btn danger">Reset save</button>
+            <p id="save-status">Save: —</p>
+            <label>Camera sensitivity <input id="set-sens" type="range" min="0.5" max="2" step="0.1" value="1" /></label>
+            <label>Graphics
+              <select id="set-gfx">
+                <option value="high">High</option>
+                <option value="med" selected>Med</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+            <label><input id="set-sound" type="checkbox" checked /> Sound</label>
+            <div>
+              <button id="btn-resume" class="btn primary">Resume</button>
+              <button id="btn-reset" class="btn danger">Reset save</button>
+            </div>
+          </div>
+        </div>
+        <div id="confirm" class="overlay hidden">
+          <div class="menu-card">
+            <p id="confirm-text"></p>
+            <button id="confirm-yes" class="btn primary">Confirm</button>
+            <button id="confirm-no" class="btn">Cancel</button>
           </div>
         </div>
         <div id="toasts" aria-live="polite"></div>
