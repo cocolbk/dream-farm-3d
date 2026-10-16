@@ -10,7 +10,7 @@ import { CROPS, BUILDINGS } from '../../src/core/Config';
 describe('phase-1 loop', () => {
   it('plant/harvest/sell/build stays consistent', () => {
     const eco = new EconomyService(200);
-    const inv = new InventoryService({ maize: 5, tomato: 0, carrot: 5 });
+    const inv = new InventoryService({ maize: 5, tomato: 0, carrot: 5, wheat: 0, pumpkin: 0 });
     const [p] = createPlots(1);
 
     // buy 1 maize seed

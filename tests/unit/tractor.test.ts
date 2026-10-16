@@ -7,6 +7,11 @@ describe('tractor', () => {
     expect(canBuyTractor('t20', 300, []).ok).toBe(true);
     expect(canBuyTractor('nope', 9999, []).ok).toBe(false);
   });
+  it('t50 requires a garage', () => {
+    expect(canBuyTractor('t50', 9999, [], false).ok).toBe(false);
+    expect(canBuyTractor('t50', 9999, [], true).ok).toBe(true);
+    expect(canBuyTractor('t50', 100, [], true).ok).toBe(false);
+  });
   it('drive step moves and clamps to bounds', () => {
     const t = createTractor('t20', 0, 0);
     const moved = driveStep(t, 1, 0, 1, 6, 38);

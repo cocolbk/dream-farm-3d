@@ -25,7 +25,7 @@ export function buildCropMesh(plot: Plot): THREE.Group {
       t.castShadow = true;
       g.add(t);
     }
-  } else {
+  } else if (plot.crop === 'carrot') {
     // carrot: leaves above, orange cone below soil line hint
     for (let i = 0; i < 3; i++) {
       const leaf = cone(0.12, 0.5, Palette.leaf, 5);
@@ -37,6 +37,24 @@ export function buildCropMesh(plot: Plot): THREE.Group {
       root.position.y = 0.25;
       root.rotation.x = Math.PI;
       g.add(root);
+    }
+  } else if (plot.crop === 'wheat') {
+    for (let i = 0; i < 3 + stage; i++) {
+      const s = cyl(0.05, 0.07, h * (0.8 + i * 0.1), Palette.maize);
+      s.position.set((i - 2) * 0.18, h * (0.4 + i * 0.05), 0);
+      g.add(s);
+    }
+  } else if (plot.crop === 'pumpkin') {
+    for (let i = 0; i < 2; i++) {
+      const leaf = cone(0.14, 0.5, Palette.leaf, 5);
+      leaf.position.set((i ? 0.3 : -0.3), h * 0.8, 0);
+      g.add(leaf);
+    }
+    if (stage >= 1) {
+      const p = new THREE.Mesh(new THREE.SphereGeometry(0.22 + stage * 0.12, 10, 8), mat(Palette.carrot));
+      p.position.y = 0.3;
+      p.castShadow = true;
+      g.add(p);
     }
   }
   return g;
@@ -73,6 +91,47 @@ export function buildBuildingMesh(defId: string): THREE.Group {
     const rail = box(1, 0.14, 0.1, Palette.wood);
     rail.position.y = 0.75;
     g.add(rail);
+  } else if (defId === 'warehouse') {
+    const base = box(def.size[0], 3, def.size[1], Palette.wood);
+    base.position.y = 1.5;
+    g.add(base);
+    const roof = box(def.size[0] + 0.6, 0.3, def.size[1] + 0.6, Palette.roof);
+    roof.position.y = 3.1;
+    g.add(roof);
+    const door = box(1.6, 2, 0.15, Palette.roof);
+    door.position.set(0, 1, def.size[1] / 2);
+    g.add(door);
+  } else if (defId === 'quarters') {
+    const base = box(def.size[0], 2.4, def.size[1], Palette.cream);
+    base.position.y = 1.2;
+    g.add(base);
+    const roof = cone(Math.max(def.size[0], def.size[1]) * 0.7, 1.4, Palette.barnRed, 4);
+    roof.position.y = 3;
+    roof.rotation.y = Math.PI / 4;
+    g.add(roof);
+  } else if (defId === 'coop') {
+    const base = box(def.size[0], 1.4, def.size[1], Palette.barnRed);
+    base.position.y = 0.7;
+    g.add(base);
+    const roof = cone(3, 1.2, Palette.roof, 4);
+    roof.position.y = 2;
+    roof.rotation.y = Math.PI / 4;
+    g.add(roof);
+    const egg = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 6), mat(Palette.cream));
+    egg.position.set(1.2, 0.25, 1.2);
+    g.add(egg);
+  } else if (defId === 'garage') {
+    const back = box(def.size[0], 2.6, 0.3, Palette.wood);
+    back.position.set(0, 1.3, -def.size[1] / 2);
+    g.add(back);
+    for (const sx of [-1, 1]) {
+      const wall = box(0.3, 2.6, def.size[1], Palette.wood);
+      wall.position.set(sx * def.size[0] / 2, 1.3, 0);
+      g.add(wall);
+    }
+    const roof = box(def.size[0] + 0.4, 0.3, def.size[1] + 0.4, Palette.roof);
+    roof.position.y = 2.75;
+    g.add(roof);
   } else {
     // path: flat slab
     const slab = box(def.size[0], 0.12, def.size[1], Palette.path);

@@ -50,16 +50,19 @@ export function buildWorld(scene: THREE.Scene): { interactables: THREE.Object3D[
   house.position.set(-10, 0, -10);
   scene.add(house);
 
-  // 6 crop plots (2 pre-tilled darker) — interactive in Phase 1
+  // 12 crop plots: 0-5 open (2 pre-tilled), 6-8 East field, 9-11 North field (locked)
   const interactables: THREE.Object3D[] = [];
-  for (let i = 0; i < 6; i++) {
-    const col = i % 3;
-    const row = Math.floor(i / 3);
-    const tilled = i < 2;
-    const plot = box(3, 0.3, 3, tilled ? Palette.soilTilled : Palette.grassDark);
-    plot.position.set(-12 + col * 4, 0.15, 2 + row * 4);
+  const plotPos = (i: number): [number, number] => {
+    if (i < 6) return [-12 + (i % 3) * 4, 2 + Math.floor(i / 3) * 4];
+    if (i < 9) return [-12 + ((i - 6) % 3) * 4, 12];
+    return [-12 + ((i - 9) % 3) * 4, 17];
+  };
+  for (let i = 0; i < 12; i++) {
+    const [x, z] = plotPos(i);
+    const plot = box(3, 0.3, 3, Palette.grassDark);
+    plot.position.set(x, 0.15, z);
     plot.name = `plot-${i}`;
-    plot.userData = { type: 'plot', index: i, tilled };
+    plot.userData = { type: 'plot', index: i };
     scene.add(plot);
     interactables.push(plot);
   }

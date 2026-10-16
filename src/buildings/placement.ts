@@ -6,6 +6,7 @@ export interface PlacedBuilding {
   x: number;
   z: number;
   rot: number;
+  level: number; // Phase 5 upgrade level (0 = base)
 }
 
 export interface AABB { minX: number; maxX: number; minZ: number; maxZ: number; }

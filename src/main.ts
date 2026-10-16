@@ -5,15 +5,16 @@ import { createCameraRig } from './world/cameraRig';
 import { buildCropMesh, buildBuildingMesh, buildTractorMesh, buildCustomerVehicleMesh, buildStaffMesh, type CustomerVehicleKind } from './world/factories';
 import { buildRoads } from './world/roads';
 import { mat } from './world/materials';
-import { Balance, CROPS, BUILDINGS, TRACTORS, Palette, type CropId } from './core/Config';
+import { Balance, CROPS, BUILDINGS, TRACTORS, LAND_TIERS, Palette, emptyCrops, type CropId } from './core/Config';
 import { bus } from './core/EventBus';
 import { EconomyService } from './economy/economy';
 import { InventoryService } from './inventory/inventory';
-import { createPlots, plant, water, tickPlot, harvest, till, type Plot } from './farming/farming';
+import { createPlots, plant, water, tickPlot, harvest, till, fertilize, type Plot } from './farming/farming';
 import { validatePlacement, type PlacedBuilding } from './buildings/placement';
+import { levelOf, upgradeCost, canUpgrade, storageCap, staffCap, customerCap, coopIncomePerCycle, hasGarage } from './buildings/effects';
+import { GOALS, checkGoals, emptyStats, type FarmStats } from './progression/goals';
 import { ShopService } from './shop/shop';
-import { canBuyTractor, createTractor, driveStep, type TractorInstance } from './vehicles/tractor';
-import {
+import { canBuyTractor, createTractor, driveStep, type TractorInstance } from './vehicles/tractor';import {
   ReservationManager, generateRequest, checkPurchase, orderTotal, spawnCustomer,
   moveAlong, exitWaypoints, mulberry32, type Customer,
 } from './customers/customers';
@@ -58,6 +59,15 @@ let paydayTimer: number = Balance.paydayInterval;
 let staffSeq = 0;
 let unpaid = false;
 
+// Phase 5 — progression: stats, goals, days, coop income (persisted)
+let stats: FarmStats = emptyStats();
+let claimed: string[] = [];
+let day = 1;
+let todayIn = 0;
+let todayOut = 0;
+let eggTimer = 0;
+let dayTimer = 0;
+
 const OBJECTIVES = [
   'Objective 1/5: 🌱 Plant a crop (select Plant, tap a plot)',
   'Objective 2/5: 💧 Water the crop',
@@ -100,7 +110,8 @@ function refreshPlotVisual(i: number): void {
   const mesh = plotMeshes[i];
   const occupied = plots[i].state !== 'empty';
   (mesh.material as THREE.MeshLambertMaterial) = mat(
-    occupied ? Palette.soilDry : plots[i].tilled ? Palette.soilTilled : Palette.grassDark,
+    plots[i].locked ? 0x9aa0a6
+    : occupied ? Palette.soilDry : plots[i].tilled ? Palette.soilTilled : Palette.grassDark,
   );
 }
 plots.forEach((_, i) => refreshPlotVisual(i));
@@ -168,7 +179,7 @@ const promptEl = document.getElementById('prompt') as HTMLElement;
 const joystickEl = document.getElementById('joystick') as HTMLElement;
 function refreshHUD(): void {
   coinsEl.textContent = `🪙 ${eco.balance}`;
-  seedsQuick.textContent = `🌽${inv.seeds.maize} 🥕${inv.seeds.carrot} 🍅${inv.seeds.tomato} | 🧺${inv.produce.maize + inv.produce.carrot + inv.produce.tomato} | 🏪${shop.stock.maize + shop.stock.tomato + shop.stock.carrot} | 🚜${tractors.length} | 🚗${customers.length} | 👥${staff.length}`;
+  seedsQuick.textContent = `🌽${inv.seeds.maize} 🥕${inv.seeds.carrot} 🍅${inv.seeds.tomato} 🌾${inv.seeds.wheat} 🎃${inv.seeds.pumpkin} ✨${inv.fertilizer} | 🧺${inv.totalProduce()}/${storageCap(buildings)} | 🏪${shop.stock.maize + shop.stock.tomato + shop.stock.carrot + shop.stock.wheat + shop.stock.pumpkin} | 🚜${tractors.length} | 🚗${customers.length} | 👥${staff.length}/${staffCap(buildings)} | 📅${day}`;
   objectiveEl.textContent = OBJECTIVES[Math.min(tutorialStep, OBJECTIVES.length - 1)];
 }
 function showPrompt(msg: string): void {
@@ -190,12 +201,39 @@ function beep(ok = true): void {
   } catch { /* audio unavailable */ }
 }
 bus.on((e) => {
-  if (e.type === 'coins:changed' || e.type === 'crop:harvested' || e.type === 'sale:completed' || e.type === 'building:placed') {
+  if (e.type === 'coins:changed') {
+    // Phase 5: lifetime + daily P/L tracking (harvest 0-touchpoints add nothing)
+    if (e.delta > 0) { stats.earned += e.delta; todayIn += e.delta; }
+    if (e.delta < 0) { todayOut += -e.delta; }
     refreshHUD();
     scheduleSave();
   }
+  if (e.type === 'crop:harvested' || e.type === 'sale:completed' || e.type === 'building:placed') {
+    refreshHUD();
+    scheduleSave();
+  }
+  if (e.type === 'sale:completed') {
+    stats.sales += 1;
+    awardGoals();
+  }
   if (e.type === 'toast') toast(e.msg);
 });
+
+/** Check + pay achievement rewards (idempotent via claimed[]). */
+function awardGoals(): void {
+  const unlockedPlots = plots.filter((p) => !p.locked).length;
+  const fresh = checkGoals({ stats, claimed, staffCount: staff.length, unlockedPlots });
+  for (const g of fresh) {
+    claimed.push(g.id);
+    eco.transact(g.reward, `achievement ${g.id}`);
+    toast(`🏆 ${g.name}! +${g.reward}🪙 — ${g.desc}`);
+    beep(true);
+  }
+  if (fresh.length > 0) {
+    refreshHUD();
+    scheduleSave();
+  }
+}
 
 // ---------- save ----------
 function collectSave() {
@@ -205,6 +243,9 @@ function collectSave() {
     shopStock: { ...shop.stock }, prices: { ...shop.prices },
     staff: staff.map((m) => ({ ...m, state: 'idle' as const, taskLabel: null, current: null, busyLeft: 0 })),
     paydayTimer,
+    fertilizer: inv.fertilizer,
+    stats: { ...stats }, claimed: [...claimed],
+    day, todayIn, todayOut,
     tutorialStep, timestamp: Date.now(),
   };
 }
@@ -229,6 +270,7 @@ function applySave(data: ReturnType<typeof loadSave>): void {
   buildings = data.buildings;
   tractors = data.tractors;
   selectedTractorUid = data.selectedTractorUid;
+  inv.fertilizer = data.fertilizer;
   shop = new ShopService();
   shop.stock = { ...data.shopStock };
   shop.prices = { ...data.prices };
@@ -243,6 +285,13 @@ function applySave(data: ReturnType<typeof loadSave>): void {
   unpaid = false;
   taskQueue = new TaskQueue(); // in-flight tasks never restored — customers re-queue fresh
   renderStaff();
+  stats = { ...data.stats };
+  claimed = [...data.claimed];
+  day = data.day;
+  todayIn = data.todayIn;
+  todayOut = data.todayOut;
+  eggTimer = 0;
+  dayTimer = 0;
   plots.forEach((_, i) => refreshPlotVisual(i));
   refreshHUD();
 }
@@ -262,7 +311,7 @@ function openSeedShop(): void {
     const c = CROPS[id];
     return `<div class="row"><span>🌱 ${c.name} — ${c.seedPrice}🪙 (have ${inv.seeds[id]})</span><button class="btn small" data-buy="${id}">Buy</button></div>`;
   }).join('');
-  openPanel('Seed Shop', rows + `<div class="row"><span>Balance: 🪙 ${eco.balance}</span></div>`);
+  openPanel('Seed Shop', rows + `<div class="row"><span>✨ Fertilizer — ${Balance.fertilizerPrice}🪙 (have ${inv.fertilizer})<br><small>x${Balance.fertilizerBoost} growth, one crop</small></span><button class="btn small" id="buy-fert">Buy</button></div><div class="row"><span>Balance: 🪙 ${eco.balance}</span></div>`);
   panelBody.querySelectorAll<HTMLButtonElement>('[data-buy]').forEach((b) => {
     b.onclick = async () => {
       const id = b.dataset.buy as CropId;
@@ -277,6 +326,15 @@ function openSeedShop(): void {
       openSeedShop();
     };
   });
+  (panelBody.querySelector('#buy-fert') as HTMLButtonElement).onclick = () => {
+    const r = eco.transact(-Balance.fertilizerPrice, 'fertilizer');
+    if (!r.ok) { toast(r.reason ?? 'Blocked', 'error'); beep(false); return; }
+    inv.fertilizer += 1;
+    beep(true);
+    toast('Bought 1 ✨ fertilizer (use Boost tool)');
+    refreshHUD();
+    openSeedShop();
+  };
 }
 function openStorage(): void {
   const rows = (Object.keys(CROPS) as CropId[]).map((id) => {
@@ -355,7 +413,8 @@ function openFarmShop(): void {
 function openDealership(): void {
   const rows = Object.values(TRACTORS).map((d) => {
     const owned = tractors.filter((t) => t.defId === d.id).length;
-    return `<div class="row"><span>🚜 ${d.name}<br><small>${d.capability} · speed ${d.speed} · owned ${owned}</small></span><span><strong>${d.price}🪙</strong> <button class="btn small" data-buy-t="${d.id}">Buy</button></span></div>`;
+    const locked = d.id === 't50' && !hasGarage(buildings);
+    return `<div class="row"><span>🚜 ${d.name}<br><small>${d.capability} · speed ${d.speed} · owned ${owned}</small></span><span><strong>${d.price}🪙</strong> <button class="btn small" data-buy-t="${d.id}"${locked ? ' disabled' : ''}>${locked ? 'Need garage' : 'Buy'}</button></span></div>`;
   }).join('');
   const list = tractors.map((t) =>
     `<div class="row"><span>🚜 ${TRACTORS[t.defId].name} @(${Math.round(t.x)},${Math.round(t.z)})${t.uid === selectedTractorUid ? ' ✓' : ''}</span><button class="btn small" data-sel="${t.uid}">Select</button></div>`,
@@ -365,7 +424,7 @@ function openDealership(): void {
     b.onclick = async () => {
       const defId = b.dataset.buyT!;
       const def = TRACTORS[defId];
-      const chk = canBuyTractor(defId, eco.balance, tractors);
+      const chk = canBuyTractor(defId, eco.balance, tractors, hasGarage(buildings));
       if (!chk.ok) { toast(chk.reason ?? 'Blocked', 'error'); beep(false); return; }
       if (!(await confirmDialog(`Buy ${def.name} for ${def.price} coins?`))) return;
       const r = eco.transact(-def.price, `tractor ${defId}`);
@@ -431,6 +490,7 @@ function checkoutCustomer(c: Customer): boolean {
     if (!s.ok) { c.reason = s.reason ?? 'Blocked'; return false; } // stock changed mid-commit
   }
   eco.transact(chk.total!, `shop sale ${c.mode} ${c.id}`);
+  if (c.wait < 15) stats.happyServes += 1; // ★★★ fast serve (patience)
   bus.emit({ type: 'sale:completed', qty: c.items.reduce((a, it) => a + it.qty, 0), revenue: chk.total! });
   beep(true);
   toast(`${KIND_ICON[customerKinds.get(c.id) ?? 'car']} ${c.mode === 'instore' ? 'In-store' : 'Drive-through'} sale +${chk.total}🪙`);
@@ -548,21 +608,45 @@ function maybeAssignRestock(m: StaffMember): boolean {
 }
 
 let lastPaydayShown = -1;
+/** Phase 5 farm tick: coop payouts + day rollover for P/L summaries. */
+function farmTick(dt: number): void {
+  eggTimer += dt;
+  if (eggTimer >= Balance.eggCycle) {
+    eggTimer = 0;
+    const income = coopIncomePerCycle(buildings);
+    if (income > 0) {
+      eco.transact(income, 'coop eggs');
+      toast(`🐔 Coops laid eggs +${income}🪙`);
+    }
+  }
+  dayTimer += dt;
+  if (dayTimer >= Balance.dayLength) {
+    dayTimer = 0;
+    day += 1;
+    const net = todayIn - todayOut;
+    toast(`📅 Day ${day} — yesterday ${net >= 0 ? '+' : ''}${net}🪙 (in ${todayIn} / out ${todayOut})`);
+    todayIn = 0;
+    todayOut = 0;
+    scheduleSave();
+  }
+}
 function staffTick(dt: number): void {
   // payday (PRD §4.8: clearly communicated interval, never silent)
   paydayTimer -= dt;
   if (paydayTimer <= 0) {
     paydayTimer = Balance.paydayInterval;
-    if (staff.length > 0) {
+    if (staff.length > 0 || buildings.length > 0) {
       const due = wagesDue(staff);
-      const r = eco.transact(-due, `wages ${staff.length} staff`);
+      const maint = buildings.length * Balance.maintenancePerBuilding;
+      const total = due + maint;
+      const r = eco.transact(-total, `wages ${staff.length} staff + maintenance`);
       if (r.ok) {
         unpaid = false;
-        toast(`💰 Payday: -${due}🪙 wages (${staff.length} staff)`);
+        toast(`💰 Payday: -${due}🪙 wages${maint > 0 ? ` -${maint}🪙 upkeep (${buildings.length} bldg)` : ''}`);
         beep(true);
       } else {
         unpaid = true; // staff idle until next payday — no silent work (§6)
-        toast(`Can't pay ${due}🪙 wages — staff idle until next payday`, 'error');
+        toast(`Can't pay ${total}🪙 payday — staff idle until next payday`, 'error');
         beep(false);
       }
     }
@@ -614,7 +698,7 @@ function spawnTick(dt: number): void {
   if (spawnTimer > 0) return;
   spawnTimer = Balance.spawnMin + rng() * (Balance.spawnMax - Balance.spawnMin);
   const active = customers.filter((c) => c.state !== 'gone').length;
-  if (active >= Balance.maxCustomers) return;
+  if (active >= customerCap(buildings)) return;
   const mode = rng() < 0.5 ? 'instore' : 'drive';
   const slot = mode === 'instore' ? resv.reserveBay() : resv.reserveQueue();
   if (slot === -1) return; // no parking/queue capacity — vehicle doesn't enter (§6)
@@ -744,8 +828,9 @@ function openCustomers(): void {
   for (const c of customers) {
     const total = orderTotal(c.items, shop.prices);
     const list = c.items.map((it) => `${it.qty}x ${it.crop}`).join(', ');
+    const stars = c.state === 'served' || c.state === 'leaving' ? '' : c.wait < 15 ? ' ★★★' : c.wait < 30 ? ' ★★' : ' ★';
     const canServe = c.state === 'shopping' || c.state === 'ordering' || c.state === 'parked' || c.state === 'queued';
-    html += `<div class="row"><span>${KIND_ICON[customerKinds.get(c.id) ?? 'car']} ${c.mode === 'instore' ? '🏪' : '🚗'} ${list} = ${total}🪙 (budget ${c.budget})<br><small>${c.reason}</small></span><span>${stateBadge(c)}${canServe ? ` <button class="btn small" data-serve="${c.id}">Serve</button>` : ''}</span></div>`;
+    html += `<div class="row"><span>${KIND_ICON[customerKinds.get(c.id) ?? 'car']} ${c.mode === 'instore' ? '🏪' : '🚗'} ${list} = ${total}🪙 (budget ${c.budget})${stars}<br><small>${c.reason}</small></span><span>${stateBadge(c)}${canServe ? ` <button class="btn small" data-serve="${c.id}">Serve</button>` : ''}</span></div>`;
   }
   openPanel('Customers & Queue', html);
   panelBody.querySelectorAll<HTMLButtonElement>('[data-serve]').forEach((b) => {
@@ -788,6 +873,9 @@ function categoryOf(reason: string): string {
   if (reason.startsWith('harvest')) return 'Harvest';
   if (reason.startsWith('wages')) return 'Wages';
   if (reason.startsWith('hire')) return 'Staff';
+  if (reason.startsWith('upgrade') || reason.startsWith('land')) return 'Expansion';
+  if (reason.startsWith('coop')) return 'Coops';
+  if (reason.startsWith('achievement')) return 'Goals';
   return 'Other';
 }
 function openLedger(): void {
@@ -797,7 +885,7 @@ function openLedger(): void {
   const rows = eco.ledger.slice(-15).reverse().map((l) =>
     `<div class="row"><span>${l.reason}</span><span>${l.delta >= 0 ? '+' : ''}${l.delta} → ${l.balance}</span></div>`,
   ).join('');
-  openPanel('Finances', `<div class="row"><strong>Balance: 🪙 ${eco.balance}</strong></div><h4>By category</h4>` + sum + `<h4>Recent</h4>` + rows);
+  openPanel('Finances', `<div class="row"><strong>Balance: 🪙 ${eco.balance}</strong></div><div class="row"><span>📅 Day ${day} — today ${todayIn - todayOut >= 0 ? '+' : ''}${todayIn - todayOut}🪙 (in ${todayIn} / out ${todayOut})</span></div><h4>By category</h4>` + sum + `<h4>Recent</h4>` + rows);
 }
 function openStaff(): void {
   const due = wagesDue(staff);
@@ -826,6 +914,11 @@ function openStaff(): void {
 
 async function hireStaff(role: StaffRole): Promise<void> {
   const def = STAFF_ROLES[role];
+  if (staff.length >= staffCap(buildings)) {
+    toast(`Staff full (${staffCap(buildings)}) — build staff quarters`, 'error');
+    beep(false);
+    return;
+  }
   if (eco.balance < def.hire) { toast(`Not enough coins (need ${def.hire}🪙)`, 'error'); beep(false); return; }
   if (def.hire >= Balance.confirmThreshold && !(await confirmDialog(`Hire ${def.name} for ${def.hire} coins? (+${def.wage}🪙/payday)`))) return;
   const r = eco.transact(-def.hire, `hire ${role}`);
@@ -837,6 +930,7 @@ async function hireStaff(role: StaffRole): Promise<void> {
   toast(`${def.icon} ${def.name} hired!`);
   refreshHUD();
   scheduleSave();
+  awardGoals();
   openStaff();
 }
 
@@ -858,6 +952,89 @@ function dismissStaff(uid: string): void {
   refreshHUD();
   scheduleSave();
   openStaff();
+}
+
+function openLand(): void {
+  let html = `<div class="row"><span>Open plots: ${plots.filter((p) => !p.locked).length}/${plots.length} · Storage cap: ${storageCap(buildings)} · Staff cap: ${staffCap(buildings)}</span></div>`;
+  html += `<h4>Land tiers</h4>`;
+  for (const tier of LAND_TIERS) {
+    const owned = tier.plots.every((i) => !plots[i]?.locked);
+    html += `<div class="row"><span>🗺️ ${tier.name} — ${tier.cost}🪙</span><button class="btn small" data-tier="${tier.id}"${owned ? ' disabled' : ''}>${owned ? 'Owned' : 'Unlock'}</button></div>`;
+  }
+  html += `<h4>Special buildings</h4>`;
+  for (const id of ['warehouse', 'quarters', 'coop', 'garage']) {
+    const d = BUILDINGS[id];
+    const n = buildings.filter((b) => b.defId === id).length;
+    html += `<div class="row"><span>${d.name} (x${n}) — ${d.cost}🪙<br><small>${d.desc}</small></span><button class="btn small" data-bland="${id}">Build…</button></div>`;
+  }
+  openPanel('Land & Expansion', html);
+  panelBody.querySelectorAll<HTMLButtonElement>('[data-tier]').forEach((b) => {
+    b.onclick = async () => {
+      const tier = LAND_TIERS.find((t) => t.id === b.dataset.tier)!;
+      if (!(await confirmDialog(`Unlock ${tier.name} for ${tier.cost} coins?`))) return;
+      const r = eco.transact(-tier.cost, `land ${tier.id}`);
+      if (!r.ok) { toast(r.reason ?? 'Blocked', 'error'); beep(false); return; }
+      for (const i of tier.plots) {
+        if (plots[i]) { plots[i].locked = false; refreshPlotVisual(i); }
+      }
+      beep(true);
+      toast(`🗺️ ${tier.name} unlocked! Till new plots with 🚜`);
+      refreshHUD();
+      scheduleSave();
+      awardGoals();
+      openLand();
+    };
+  });
+  panelBody.querySelectorAll<HTMLButtonElement>('[data-bland]').forEach((b) => {
+    b.onclick = () => {
+      buildDefId = b.dataset.bland!;
+      tool = 'build';
+      syncToolUI();
+      updateGhost();
+      panel.classList.add('hidden');
+      toast(`Placing ${buildDefId} — tap open ground`);
+    };
+  });
+}
+
+function openGoals(): void {
+  const unlockedPlots = plots.filter((p) => !p.locked).length;
+  const net = todayIn - todayOut;
+  let html = `<div class="row"><span>📅 Day ${day} · Today ${net >= 0 ? '+' : ''}${net}🪙 (in ${todayIn} / out ${todayOut})</span></div>`;
+  html += `<div class="row"><small>Earned ${stats.earned} · sales ${stats.sales} · ★★★ serves ${stats.happyServes} · harvests ${stats.harvests} · plots ${unlockedPlots}/12 · staff ${staff.length}/${staffCap(buildings)} · storage ${inv.totalProduce()}/${storageCap(buildings)}</small></div>`;
+  html += `<h4>Achievements</h4>`;
+  for (const g of GOALS) {
+    const done = claimed.includes(g.id);
+    html += `<div class="row"><span>${done ? '✅' : '🔲'} ${g.name} — +${g.reward}🪙<br><small>${g.desc}</small></span></div>`;
+  }
+  openPanel('Goals & Progress', html);
+}
+
+function openBuildingInfo(id: string): void {
+  const b = buildings.find((x) => x.id === id);
+  if (!b) return;
+  const def = BUILDINGS[b.defId];
+  const up = canUpgrade(b.defId, b.level ?? 0);
+  const cost = upgradeCost(b.defId, b.level ?? 0);
+  let effect = def.desc;
+  if (b.defId === 'barn') effect += ` (now +${(b.level ?? 0) * Balance.barnCapPerLevel} storage)`;
+  if (b.defId === 'shop') effect += ` (now +${b.level ?? 0} customer capacity)`;
+  if (b.defId === 'coop') effect += ` (now ${coopIncomePerCycle([b])}🪙/${Balance.eggCycle}s)`;
+  openPanel(def.name, `<div class="row"><span>Level ${b.level ?? 0}${def.maxLevel > 0 ? ` / ${def.maxLevel}` : ''}<br><small>${effect}</small></span>${up ? `<button class="btn small" id="upg">Upgrade ${cost}🪙</button>` : '<span>Max / n/a</span>'}</div>`);
+  const btn = panelBody.querySelector('#upg') as HTMLButtonElement | null;
+  if (btn) {
+    btn.onclick = async () => {
+      if (!(await confirmDialog(`Upgrade ${def.name} to level ${(b.level ?? 0) + 1} for ${cost} coins?`))) return;
+      const r = eco.transact(-cost, `upgrade ${b.defId}`);
+      if (!r.ok) { toast(r.reason ?? 'Blocked', 'error'); beep(false); return; }
+      b.level = (b.level ?? 0) + 1;
+      beep(true);
+      toast(`⬆️ ${def.name} → level ${b.level}`);
+      refreshHUD();
+      scheduleSave();
+      openBuildingInfo(id);
+    };
+  }
 }
 
 function openBuildMenu(): void {
@@ -913,6 +1090,8 @@ document.querySelectorAll<HTMLButtonElement>('.crop-pick').forEach((btn) => {
 (document.getElementById('btn-farmshop') as HTMLButtonElement).onclick = openFarmShop;
 (document.getElementById('btn-customers') as HTMLButtonElement).onclick = openCustomers;
 (document.getElementById('btn-staff') as HTMLButtonElement).onclick = openStaff;
+(document.getElementById('btn-land') as HTMLButtonElement).onclick = openLand;
+(document.getElementById('btn-goals') as HTMLButtonElement).onclick = openGoals;
 (document.getElementById('btn-dealer') as HTMLButtonElement).onclick = openDealership;
 (document.getElementById('btn-fin') as HTMLButtonElement).onclick = openLedger;
 (document.getElementById('joy-exit') as HTMLButtonElement).onclick = () => {
@@ -976,15 +1155,37 @@ async function applyToolToPlot(i: number): Promise<void> {
   } else if (tool === 'harvest') {
     const r = harvest(p);
     if (!r.ok) { toast(`${r.reason} (${p.state} ${Math.round(p.progress * 100)}%)`, 'error'); beep(false); return; }
+    if (inv.totalProduce() + r.qty! > storageCap(buildings)) {
+      toast(`Storage full (${storageCap(buildings)}) — build a barn/warehouse`, 'error');
+      beep(false);
+      // put the crop back: re-mark ready
+      p.state = 'ready';
+      p.crop = r.crop!;
+      p.progress = 1;
+      p.growthTime = CROPS[r.crop!].growTime;
+      refreshPlotVisual(i);
+      return;
+    }
     inv.addProduce(r.crop!, r.qty!);
     eco.transact(0, `harvest ${r.crop}x${r.qty}`);
+    stats.harvests += 1;
+    awardGoals();
     beep(true);
     toast(`+${r.qty} ${r.crop} harvested`);
     bus.emit({ type: 'crop:harvested', plot: i, crop: r.crop!, qty: r.qty! });
     if (tutorialStep === 2) tutorialStep = 3;
+  } else if (tool === 'boost') {
+    if (inv.fertilizer <= 0) { toast('No fertilizer — buy some in 🌱 Seeds', 'error'); beep(false); openSeedShop(); return; }
+    const r = fertilize(p);
+    if (!r.ok) { toast(r.reason ?? 'Blocked', 'error'); beep(false); return; }
+    inv.fertilizer -= 1;
+    eco.transact(0, 'fertilize plot');
+    beep(true);
+    showPrompt(`✨ fertilized — growing x${Balance.fertilizerBoost}`);
   } else if (tool === 'interact' || tool === 'drive') {
-    const tillTxt = p.tilled ? 'tilled' : 'UNTILLED (🚜 Till needed)';
-    showPrompt(`Plot ${i}: ${p.state}${p.crop ? ` ${p.crop}` : ''} ${Math.round(p.progress * 100)}% 💧x${p.water} · ${tillTxt}`);
+    const tillTxt = p.locked ? '🔒 LOCKED (expand land)' : p.tilled ? 'tilled' : 'UNTILLED (🚜 Till needed)';
+    const boostTxt = p.boosted ? ' · ✨ boosted' : '';
+    showPrompt(`Plot ${i}: ${p.state}${p.crop ? ` ${p.crop}` : ''} ${Math.round(p.progress * 100)}% 💧x${p.water} · ${tillTxt}${boostTxt}`);
     return;
   } else if (tool === 'build') {
     showPrompt('Build tool: tap open ground, not a plot');
@@ -1002,7 +1203,7 @@ async function tryPlaceBuilding(): Promise<void> {
   if (def.cost >= Balance.confirmThreshold && !(await confirmDialog(`Place ${def.name} for ${def.cost} coins?`))) return;
   const r = eco.transact(-def.cost, `build ${buildDefId}`);
   if (!r.ok) { toast(r.reason ?? 'Blocked', 'error'); beep(false); return; }
-  const b: PlacedBuilding = { id: `b${Date.now()}`, defId: buildDefId, x: Math.round(ghostPos.x), z: Math.round(ghostPos.z), rot: 0 };
+  const b: PlacedBuilding = { id: `b${Date.now()}`, defId: buildDefId, x: Math.round(ghostPos.x), z: Math.round(ghostPos.z), rot: 0, level: 0 };
   buildings.push(b);
   renderBuilding(b);
   beep(true);
@@ -1042,6 +1243,16 @@ function pick(clientX: number, clientY: number): void {
   if (vHits.length > 0) {
     openCustomers();
     return;
+  }
+  // building tap (interact tool) -> upgrade info
+  if (tool === 'interact') {
+    const bHits = raycaster.intersectObjects(buildingGroup.children, true);
+    if (bHits.length > 0) {
+      let o: THREE.Object3D | null = bHits[0].object;
+      let bid: string | undefined;
+      while (o && !bid) { bid = (o.userData as { buildingId?: string }).buildingId; o = o.parent; }
+      if (bid) { openBuildingInfo(bid); return; }
+    }
   }
   // plots
   const hits = raycaster.intersectObjects(plotMeshes, false);
@@ -1117,6 +1328,13 @@ function startGame(fresh: boolean): void {
     unpaid = false;
     staffSeq = 0;
     renderStaff();
+    stats = emptyStats();
+    claimed = [];
+    day = 1;
+    todayIn = 0;
+    todayOut = 0;
+    eggTimer = 0;
+    dayTimer = 0;
     plots.forEach((_, i) => refreshPlotVisual(i));
   }
   menu.classList.add('hidden');
@@ -1193,6 +1411,7 @@ function animate(now: number): void {
     lastTick = now;
     customersTick(dt);
     staffTick(dt);
+    farmTick(dt);
     let grown = false;
     for (let i = 0; i < plots.length; i++) {
       const before = plots[i].state;

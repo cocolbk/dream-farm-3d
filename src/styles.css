@@ -24,7 +24,7 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Se
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .hidden { display: none !important; }
 #hud { position: absolute; inset: 0; pointer-events: none; }
-#topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 12px; align-items: center; background: var(--bg); color: #fff; padding: 8px 12px; font-size: 14px; pointer-events: auto; }
+#topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 8px; align-items: center; background: var(--bg); color: #fff; padding: 8px 12px; font-size: 14px; pointer-events: auto; flex-wrap: wrap; }
 #coins { font-weight: 700; color: var(--coin); }
 #objective { flex: 1; }
 #save-dot { color: var(--accent); }

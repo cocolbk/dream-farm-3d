@@ -1,4 +1,4 @@
-import { CROPS, type CropId } from '../core/Config';
+import { CROPS, emptyCrops, type CropId } from '../core/Config';
 
 // Shop stock + pricing. Works with InventoryService + EconomyService atomically
 // via transfer()/sell() helpers (no dupes: validate first, mutate once).
@@ -10,16 +10,14 @@ export interface SaleRecord {
 }
 
 export class ShopService {
-  stock: Record<CropId, number> = { maize: 0, tomato: 0, carrot: 0 };
+  stock: Record<CropId, number> = emptyCrops();
   prices: Record<CropId, number>;
   recentSales: SaleRecord[] = [];
 
   constructor() {
-    this.prices = {
-      maize: CROPS.maize.sellBase,
-      tomato: CROPS.tomato.sellBase,
-      carrot: CROPS.carrot.sellBase,
-    };
+    const prices = emptyCrops();
+    for (const id of Object.keys(CROPS) as CropId[]) prices[id] = CROPS[id].sellBase;
+    this.prices = prices;
   }
 
   setPrice(crop: CropId, price: number): { ok: boolean; reason?: string } {

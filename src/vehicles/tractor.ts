@@ -9,10 +9,12 @@ export interface TractorInstance {
 }
 
 /** Pure ownership helpers (unit-tested). Movement integrated in main.ts. */
-export function canBuyTractor(defId: string, balance: number, owned: TractorInstance[]): { ok: boolean; reason?: string } {
+export function canBuyTractor(defId: string, balance: number, owned: TractorInstance[], hasGarageBuilt = true): { ok: boolean; reason?: string } {
   const def = TRACTORS[defId];
   if (!def) return { ok: false, reason: 'Unknown tractor' };
+  if (defId === 't50' && !hasGarageBuilt) return { ok: false, reason: 'Requires a garage' };
   if (balance < def.price) return { ok: false, reason: 'Not enough coins' };
+  void owned;
   return { ok: true };
 }
 

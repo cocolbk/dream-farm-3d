@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createPlots, plant, water, tickPlot, harvest, till } from '../../src/farming/farming';
+import { createPlots, plant, water, tickPlot, harvest, till, fertilize } from '../../src/farming/farming';
 
 describe('farming', () => {
   it('full cycle maize with 1 water (pre-tilled plot 0)', () => {
@@ -42,5 +42,27 @@ describe('farming', () => {
     water(p);
     tickPlot(p, 120);
     expect(p.state).toBe('ready');
+  });
+  it('locked plots reject till/plant/fertilize', () => {
+    const plots = createPlots(12);
+    expect(plots[6].locked).toBe(true);
+    expect(plots[5].locked).toBe(false);
+    expect(till(plots[6]).ok).toBe(false);
+    expect(plant(plots[6], 'maize').ok).toBe(false);
+    expect(fertilize(plots[6]).ok).toBe(false);
+  });
+  it('fertilizer speeds growth ~1.3x', () => {
+    const plots = createPlots(6);
+    const [a, b] = [plots[0], plots[1]];
+    plant(a, 'wheat');
+    plant(b, 'wheat');
+    water(a);
+    water(b);
+    expect(fertilize(a).ok).toBe(true);
+    expect(fertilize(a).ok).toBe(false); // once only
+    tickPlot(a, 50);
+    tickPlot(b, 50);
+    expect(a.progress).toBeGreaterThan(b.progress);
+    expect(a.progress).toBeCloseTo(Math.min(1, 50 * 1.3 / 100), 5);
   });
 });

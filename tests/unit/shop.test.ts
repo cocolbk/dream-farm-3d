@@ -7,7 +7,7 @@ import { CROPS } from '../../src/core/Config';
 describe('shop', () => {
   it('transfer produce -> stock -> priced sale is exact (no dupes)', () => {
     const eco = new EconomyService(200);
-    const inv = new InventoryService({ maize: 0, tomato: 0, carrot: 0 });
+    const inv = new InventoryService({ maize: 0, tomato: 0, carrot: 0, wheat: 0, pumpkin: 0 });
     const shop = new ShopService();
     inv.addProduce('maize', 6);
     // transfer 4
@@ -35,7 +35,7 @@ describe('shop', () => {
     expect(shop.prices.carrot).toBe(CROPS.carrot.minPrice);
   });
   it('invalid transfer qty blocked', () => {
-    const inv = new InventoryService({ maize: 0, tomato: 0, carrot: 0 });
+    const inv = new InventoryService({ maize: 0, tomato: 0, carrot: 0, wheat: 0, pumpkin: 0 });
     expect(inv.takeProduce('maize', 0).ok).toBe(false);
     expect(inv.takeProduce('maize', 5).ok).toBe(false);
   });

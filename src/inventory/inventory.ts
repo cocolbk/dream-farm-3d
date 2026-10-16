@@ -1,13 +1,18 @@
-import type { CropId } from '../core/Config';
+import { emptyCrops, type CropId } from '../core/Config';
 
 // AD-3: ONLY mutator of seeds/produce. Sales use reserve/commit atomically.
 export class InventoryService {
   seeds: Record<CropId, number>;
   produce: Record<CropId, number>;
+  fertilizer = 0;
 
   constructor(startSeeds: Record<CropId, number>) {
     this.seeds = { ...startSeeds };
-    this.produce = { maize: 0, tomato: 0, carrot: 0 };
+    this.produce = emptyCrops();
+  }
+
+  totalProduce(): number {
+    return (Object.keys(this.produce) as CropId[]).reduce((a, k) => a + this.produce[k], 0);
   }
 
   takeSeed(crop: CropId): { ok: boolean; reason?: string } {

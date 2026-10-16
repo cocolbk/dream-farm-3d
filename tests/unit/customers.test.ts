@@ -6,8 +6,8 @@ import {
 import { ShopService } from '../../src/shop/shop';
 import { EconomyService } from '../../src/economy/economy';
 
-const STOCK = { maize: 10, tomato: 10, carrot: 10 };
-const PRICES = { maize: 8, tomato: 14, carrot: 5 };
+const STOCK = { maize: 10, tomato: 10, carrot: 10, wheat: 10, pumpkin: 10 };
+const PRICES = { maize: 8, tomato: 14, carrot: 5, wheat: 10, pumpkin: 18 };
 
 describe('reservations', () => {
   it('rejects double-booking', () => {
@@ -43,7 +43,7 @@ describe('headless traffic: exact-once revenue', () => {
   it('20 customers: ledger == inventory delta, no dupes', () => {
     const eco = new EconomyService(200);
     const shop = new ShopService();
-    shop.stock = { maize: 100, tomato: 100, carrot: 100 };
+    shop.stock = { maize: 100, tomato: 100, carrot: 100, wheat: 100, pumpkin: 100 };
     const rng = mulberry32(42);
     let soldQty = 0;
     let expectedRevenue = 0;
@@ -62,8 +62,8 @@ describe('headless traffic: exact-once revenue', () => {
       soldQty += req.items.reduce((a, it) => a + it.qty, 0);
       expectedRevenue += chk.total!;
     }
-    const startStock = 300;
-    const endStock = shop.stock.maize + shop.stock.tomato + shop.stock.carrot;
+    const startStock = 500;
+    const endStock = shop.stock.maize + shop.stock.tomato + shop.stock.carrot + shop.stock.wheat + shop.stock.pumpkin;
     expect(startStock - endStock).toBe(soldQty);
     const sum = eco.ledger.reduce((a, l) => a + l.delta, 0);
     expect(200 + sum).toBe(eco.balance);
