@@ -4,7 +4,7 @@ import { buildWorld } from './world/scene';
 import { createCameraRig } from './world/cameraRig';
 import { buildCropMesh, buildBuildingMesh, buildTractorMesh, buildCustomerVehicleMesh, buildStaffMesh, type CustomerVehicleKind } from './world/factories';
 import { buildRoads } from './world/roads';
-import { mat } from './world/materials';
+import { mat, ground } from './world/materials';
 import { Balance, CROPS, BUILDINGS, TRACTORS, LAND_TIERS, Palette, emptyCrops, type CropId } from './core/Config';
 import { bus } from './core/EventBus';
 import { EconomyService } from './economy/economy';
@@ -112,10 +112,9 @@ function refreshPlotVisual(i: number): void {
   cropGroups.set(i, g);
   const mesh = plotMeshes[i];
   const occupied = plots[i].state !== 'empty';
-  (mesh.material as THREE.MeshLambertMaterial) = mat(
-    plots[i].locked ? 0x9aa0a6
-    : occupied ? Palette.soilDry : plots[i].tilled ? Palette.soilTilled : Palette.grassDark,
-  );
+  (mesh.material as THREE.Material) = plots[i].locked
+    ? mat(0x9aa0a6)
+    : occupied ? ground.soilDry : plots[i].tilled ? ground.soil : ground.grass;
 }
 plots.forEach((_, i) => refreshPlotVisual(i));
 
@@ -165,8 +164,10 @@ function updateGhost(): void {
   ghost = buildBuildingMesh(buildDefId);
   ghost.traverse((o) => {
     if (o instanceof THREE.Mesh) {
-      (o.material as THREE.Material).transparent = true;
-      (o.material as THREE.Material).opacity = 0.6;
+      // clone: shared cached materials must never be tinted/faded in place
+      o.material = (o.material as THREE.Material).clone();
+      o.material.transparent = true;
+      o.material.opacity = 0.6;
     }
   });
   ghost.position.copy(ghostPos);

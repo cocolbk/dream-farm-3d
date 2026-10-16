@@ -37,7 +37,7 @@ h2 { margin:0 0 4px; font-size:18px; }
 <body>
 <header><h1>🌾 Dream Farm 3D — Design System v1</h1><p>Cozy low-poly diorama · system fonts · 44px touch targets · icon + text statuses (never color-only)</p></header>
 <div class="wrap">
-<section class="card"><h2>1 · Palette (3D world + UI share these)</h2><div class="sub">All Three.js materials reference these hex values — <code>src/core/Config.ts → Palette</code>. No textures in MVP.</div>
+<section class="card"><h2>1 · Palette (3D world + UI share these)</h2><div class="sub">All Three.js materials reference these hex values — <code>src/core/Config.ts → Palette</code>. Procedural canvas textures (<code>src/world/textures.ts</code>) add grain: grass, soil furrows, wood, roof tiles.</div>
 <div class="swatches">
 <div class="sw"><div class="c" style="background:#7EC850"></div><div class="t">grass #7EC850</div></div>
 <div class="sw"><div class="c" style="background:#5DA93C"></div><div class="t">grassDark #5DA93C</div></div>
@@ -68,7 +68,7 @@ h2 { margin:0 0 4px; font-size:18px; }
 <div class="row"><span>🌱 Maize — 10🪙 (have 5)</span><button class="btn small">Buy</button></div>
 <div class="row"><span>Farm Shop stock: maize 4 @ 8🪙</span><button class="btn small">Sell 1</button></div><br>
 <span class="toast">+3 maize harvested</span><span class="toast">🚜 plot 4 cultivated</span><span class="toast error">Not enough coins</span></section>
-<section class="card"><h2>6 · 3D visual language</h2><div class="sub">Flat-shaded primitives, shared materials, hemisphere + 1 directional shadow light, fog. Plot states: empty (grass/tilled soil) → planted (sprout) → growing (bush) → ready (full + produce) + always a text label, never color-only.</div>
+<section class="card"><h2>6 · 3D visual language</h2><div class="sub">Textured low-poly diorama: grass/soil/wood/roof canvas textures, glossy produce and glass, detailed crops (maize stalks with husks, staked tomatoes, carrot mounds, wheat heads, ribbed pumpkins) and buildings (barn gambrel roof + X-brace door, shop awning + sign, coops with runs, garages with tire stacks). Hemisphere + key sun with shadows + cool fill light, fog. Plot states always carry a text label, never color-only.</div>
 <div class="row"><span>🌱 planted — sprout 0.4m</span><span>sprout + "planted 0%"</span></div>
 <div class="row"><span>🌿 growing — bush 0.9m</span><span>bush + "growing 54%"</span></div>
 <div class="row"><span>🌽 ready — full 1.4m + cobs/tomatoes/roots</span><span>full + "READY"</span></div>
