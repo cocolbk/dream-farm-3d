@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import './styles.css';
 import { buildWorld } from './world/scene';
 import { createCameraRig } from './world/cameraRig';
-import { buildCropMesh, buildBuildingMesh, buildTractorMesh, buildCustomerVehicleMesh, type CustomerVehicleKind } from './world/factories';
+import { buildCropMesh, buildBuildingMesh, buildTractorMesh, buildCustomerVehicleMesh, buildStaffMesh, type CustomerVehicleKind } from './world/factories';
 import { buildRoads } from './world/roads';
 import { mat } from './world/materials';
 import { Balance, CROPS, BUILDINGS, TRACTORS, Palette, type CropId } from './core/Config';
@@ -17,6 +17,10 @@ import {
   ReservationManager, generateRequest, checkPurchase, orderTotal, spawnCustomer,
   moveAlong, exitWaypoints, mulberry32, type Customer,
 } from './customers/customers';
+import {
+  STAFF_ROLES, createStaffMember, TaskQueue, wagesDue, isAvailable,
+  type StaffMember, type StaffRole, type Task,
+} from './staff/staff';
 import { defaultSave, loadSave, writeSave, clearSave, SAVE_KEY, SAVE_VERSION } from './save/save';
 import { toast, confirmDialog } from './ui/hud';
 
@@ -46,6 +50,13 @@ const resv = new ReservationManager();
 let rng = mulberry32(Date.now() % 100000);
 let spawnTimer = 8; // first visitor arrives soon after game start
 let customerSeq = 0;
+
+// Phase 4 — staff roster + task queue + wages (staff persisted, tasks transient)
+let staff: StaffMember[] = [];
+let taskQueue = new TaskQueue();
+let paydayTimer: number = Balance.paydayInterval;
+let staffSeq = 0;
+let unpaid = false;
 
 const OBJECTIVES = [
   'Objective 1/5: 🌱 Plant a crop (select Plant, tap a plot)',
@@ -157,7 +168,7 @@ const promptEl = document.getElementById('prompt') as HTMLElement;
 const joystickEl = document.getElementById('joystick') as HTMLElement;
 function refreshHUD(): void {
   coinsEl.textContent = `🪙 ${eco.balance}`;
-  seedsQuick.textContent = `🌽${inv.seeds.maize} 🥕${inv.seeds.carrot} 🍅${inv.seeds.tomato} | 🧺${inv.produce.maize + inv.produce.carrot + inv.produce.tomato} | 🏪${shop.stock.maize + shop.stock.tomato + shop.stock.carrot} | 🚜${tractors.length} | 🚗${customers.length}`;
+  seedsQuick.textContent = `🌽${inv.seeds.maize} 🥕${inv.seeds.carrot} 🍅${inv.seeds.tomato} | 🧺${inv.produce.maize + inv.produce.carrot + inv.produce.tomato} | 🏪${shop.stock.maize + shop.stock.tomato + shop.stock.carrot} | 🚜${tractors.length} | 🚗${customers.length} | 👥${staff.length}`;
   objectiveEl.textContent = OBJECTIVES[Math.min(tutorialStep, OBJECTIVES.length - 1)];
 }
 function showPrompt(msg: string): void {
@@ -192,6 +203,8 @@ function collectSave() {
     version: SAVE_VERSION, coins: eco.balance, seeds: { ...inv.seeds }, produce: { ...inv.produce },
     plots, buildings, tractors, selectedTractorUid,
     shopStock: { ...shop.stock }, prices: { ...shop.prices },
+    staff: staff.map((m) => ({ ...m, state: 'idle' as const, taskLabel: null, current: null, busyLeft: 0 })),
+    paydayTimer,
     tutorialStep, timestamp: Date.now(),
   };
 }
@@ -224,6 +237,12 @@ function applySave(data: ReturnType<typeof loadSave>): void {
   buildings.forEach(renderBuilding);
   renderTractors();
   clearCustomers(); // vehicles are transient — never restored from save (§6)
+  staff = data.staff;
+  staffSeq = staff.reduce((a, m) => Math.max(a, Number(m.uid.slice(1)) || 0), 0);
+  paydayTimer = data.paydayTimer;
+  unpaid = false;
+  taskQueue = new TaskQueue(); // in-flight tasks never restored — customers re-queue fresh
+  renderStaff();
   plots.forEach((_, i) => refreshPlotVisual(i));
   refreshHUD();
 }
@@ -431,6 +450,163 @@ function sendLeaving(c: Customer, reason: string): void {
   c.waypoints = exitWaypoints();
   c.wpIndex = 0;
   releaseSlot(c); // free the slot before the exit drive (reserved before moving, §6)
+  // Phase 4: drop queued tasks + free any staffer holding this customer (no phantom work)
+  taskQueue.removeForCustomer(c.id);
+  for (const m of staff) {
+    if (m.state === 'busy' && m.current?.customerId === c.id) {
+      m.state = 'idle';
+      m.current = null;
+      m.taskLabel = null;
+      m.busyLeft = 0;
+    }
+  }
+}
+
+// ---------- Phase 4: staff visuals, task execution, wages ----------
+const staffGroup = new THREE.Group();
+scene.add(staffGroup);
+
+/** Fixed posts ringed around the service hut — deterministic, no persistence needed. */
+function staffPost(i: number): { x: number; z: number } {
+  const a = i * 2.4;
+  return { x: 0.5 + Math.cos(a) * 3.2, z: 3.5 + Math.sin(a) * 3.2 };
+}
+
+function renderStaff(): void {
+  staffGroup.clear();
+  staff.forEach((m, i) => {
+    const g = buildStaffMesh(STAFF_ROLES[m.role].color);
+    const p = staffPost(i);
+    g.position.set(p.x, 0, p.z);
+    g.userData.staffUid = m.uid;
+    staffGroup.add(g);
+  });
+}
+
+function findCustomer(id: string | undefined): Customer | undefined {
+  if (!id) return undefined;
+  return customers.find((c) => c.id === id);
+}
+
+function taskLabelFor(kind: Task['kind'], c: Customer | undefined): string {
+  if (kind === 'restock') return 'Restocking shelves';
+  if (!c) return kind;
+  if (kind === 'collect') return `Collecting ${c.id}`;
+  if (kind === 'checkout') return `Checking out ${c.id}`;
+  return `Serving ${c.id} (drive)`;
+}
+
+function completeTask(m: StaffMember): void {
+  const task = m.current;
+  m.state = 'idle';
+  m.current = null;
+  m.taskLabel = null;
+  m.busyLeft = 0;
+  if (!task) return;
+  if (task.kind === 'collect') {
+    const c = findCustomer(task.customerId);
+    // guard: customer may have left or been served by the owner meanwhile
+    if (c && c.state === 'shopping' && c.serveStage === 'collecting') {
+      c.serveStage = 'readyCheckout';
+      c.reason = 'Order collected — waiting for cashier';
+    }
+  } else if (task.kind === 'checkout') {
+    const c = findCustomer(task.customerId);
+    if (c && c.state === 'shopping' && c.serveStage === 'checking') {
+      if (checkoutCustomer(c)) sendLeaving(c, 'Served — thank you!');
+      else { c.serveStage = 'readyCheckout'; } // stock/budget changed: re-queue next tick
+    }
+  } else if (task.kind === 'driveOrder') {
+    const c = findCustomer(task.customerId);
+    if (c && c.state === 'ordering' && c.serveStage === 'driving') {
+      if (checkoutCustomer(c)) sendLeaving(c, 'Served — thank you!');
+      else { c.serveStage = 'driveQueued'; }
+    }
+  } else if (task.kind === 'restock' && task.crop) {
+    const qty = Math.min(task.qty ?? Balance.restockQty, inv.produce[task.crop]);
+    if (qty > 0) {
+      inv.takeProduce(task.crop, qty);
+      shop.addStock(task.crop, qty);
+      toast(`📦 Restocked ${qty}x ${task.crop} to shop`);
+      scheduleSave();
+    }
+  }
+  refreshHUD();
+}
+
+function maybeAssignRestock(m: StaffMember): boolean {
+  const need = (Object.keys(CROPS) as CropId[]).find(
+    (crop) => shop.stock[crop] < Balance.restockThreshold && inv.produce[crop] > 0,
+  );
+  if (!need) return false;
+  const qty = Math.min(Balance.restockQty, inv.produce[need]);
+  m.state = 'busy';
+  m.busyLeft = Balance.restockTime;
+  m.current = { id: `r${Date.now()}${m.uid}`, kind: 'restock', crop: need, qty, duration: Balance.restockTime };
+  m.taskLabel = `Restocking ${qty}x ${need}`;
+  return true;
+}
+
+let lastPaydayShown = -1;
+function staffTick(dt: number): void {
+  // payday (PRD §4.8: clearly communicated interval, never silent)
+  paydayTimer -= dt;
+  if (paydayTimer <= 0) {
+    paydayTimer = Balance.paydayInterval;
+    if (staff.length > 0) {
+      const due = wagesDue(staff);
+      const r = eco.transact(-due, `wages ${staff.length} staff`);
+      if (r.ok) {
+        unpaid = false;
+        toast(`💰 Payday: -${due}🪙 wages (${staff.length} staff)`);
+        beep(true);
+      } else {
+        unpaid = true; // staff idle until next payday — no silent work (§6)
+        toast(`Can't pay ${due}🪙 wages — staff idle until next payday`, 'error');
+        beep(false);
+      }
+    }
+  }
+  // assign idle staff by priority: drive orders > checkout > collect, restock last
+  if (!unpaid) {
+    for (const m of staff) {
+      if (!isAvailable(m, unpaid)) continue;
+      if (m.role === 'stock') {
+        if (maybeAssignRestock(m)) continue;
+      } else {
+        const kind = m.role === 'attendant' ? 'collect' : m.role === 'cashier' ? 'checkout' : 'driveOrder';
+        const task = taskQueue.claim(kind);
+        if (task) {
+          const c = findCustomer(task.customerId);
+          // claim only if the customer still needs it; else drop and stay idle
+          const valid = c && (
+            (kind === 'collect' && c.state === 'shopping' && c.serveStage === 'collectQueued') ||
+            (kind === 'checkout' && c.state === 'shopping' && c.serveStage === 'checkoutQueued') ||
+            (kind === 'driveOrder' && c.state === 'ordering' && c.serveStage === 'driveQueued')
+          );
+          if (!valid) continue;
+          m.state = 'busy';
+          m.current = task;
+          m.busyLeft = task.duration;
+          m.taskLabel = taskLabelFor(kind, c);
+          if (kind === 'collect') c!.serveStage = 'collecting';
+          if (kind === 'checkout') c!.serveStage = 'checking';
+          if (kind === 'driveOrder') c!.serveStage = 'driving';
+        }
+      }
+    }
+  }
+  // progress busy staff
+  for (const m of staff) {
+    if (m.state !== 'busy' || !m.current) continue;
+    m.busyLeft -= dt;
+    if (m.busyLeft <= 0) completeTask(m);
+  }
+  const whole = Math.ceil(paydayTimer);
+  if (whole !== lastPaydayShown) {
+    lastPaydayShown = whole;
+    if (panelTitle.textContent === 'Staff') openStaff();
+  }
 }
 
 function spawnTick(dt: number): void {
@@ -467,9 +643,17 @@ function customersTick(dt: number): void {
         c.reason = 'Shopping…';
       }
       if (c.state === 'shopping') {
-        if (checkoutCustomer(c)) {
-          sendLeaving(c, 'Served — thank you!');
-        } else if (c.wait >= Balance.serveTimeout) {
+        // Phase 4 pipeline: attendant collects -> cashier checks out (owner Serve = backup)
+        if (c.serveStage === 'none') {
+          taskQueue.enqueue('collect', Balance.collectTime, { customerId: c.id });
+          c.serveStage = 'collectQueued';
+          c.reason = 'Shopping — waiting for shop attendant';
+        } else if (c.serveStage === 'readyCheckout') {
+          taskQueue.enqueue('checkout', Balance.checkoutTime, { customerId: c.id });
+          c.serveStage = 'checkoutQueued';
+          c.reason = 'Ready — waiting for cashier';
+        }
+        if (c.wait >= Balance.serveTimeout) {
           sendLeaving(c, `Left: ${c.reason}`);
           toast(`Customer left: ${c.reason}`, 'error');
         }
@@ -481,12 +665,21 @@ function customersTick(dt: number): void {
         panelDirty = true;
       }
       if (c.state === 'ordering') {
+        if (c.serveStage === 'none') {
+          taskQueue.enqueue('driveOrder', Balance.driveServeTime, { customerId: c.id });
+          c.serveStage = 'driveQueued';
+          c.reason = 'Ordering — waiting for drive attendant (or Serve)';
+        }
         if (c.wait >= Balance.driveAutoServe) {
-          // pre-staff fallback: player handoff, auto after timeout so the lane never jams
+          // owner-help fallback so the lane never jams without staff
+          if (c.serveStage === 'driveQueued') taskQueue.removeForCustomer(c.id);
           if (checkoutCustomer(c)) sendLeaving(c, 'Served — thank you!');
-          else if (c.wait >= Balance.serveTimeout) {
-            sendLeaving(c, `Left: ${c.reason}`);
-            toast(`Drive-through left: ${c.reason}`, 'error');
+          else {
+            c.serveStage = 'none'; // re-queue for the attendant next tick; owner retries too
+            if (c.wait >= Balance.serveTimeout) {
+              sendLeaving(c, `Left: ${c.reason}`);
+              toast(`Drive-through left: ${c.reason}`, 'error');
+            }
           }
           panelDirty = true;
         } else if (c.wait >= Balance.serveTimeout) {
@@ -545,6 +738,8 @@ function openCustomers(): void {
   const queued = customers.filter((c) => c.mode === 'drive' && c.state !== 'leaving' && c.state !== 'gone').length;
   const parked = resv.bays.filter(Boolean).length;
   let html = `<div class="row"><span>🅿️ Parking ${parked}/${Balance.parkingBays} · 🚗 Queue ${queued}/${Balance.driveQueueSlots}</span></div>`;
+  const onDuty = (r: StaffRole) => staff.filter((m) => m.role === r && !unpaid).length;
+  html += `<div class="row"><small>On duty: 🧑‍🌾x${onDuty('attendant')} 🧾x${onDuty('cashier')} 📦x${onDuty('stock')} 🍔x${onDuty('drive')}${unpaid ? ' · UNPAID — idle' : ''} — owner Serve works as backup</small></div>`;
   if (customers.length === 0) html += '<p>No visitors yet — stock the 🏪 shop and they will come.</p>';
   for (const c of customers) {
     const total = orderTotal(c.items, shop.prices);
@@ -591,6 +786,8 @@ function categoryOf(reason: string): string {
   if (reason.startsWith('build')) return 'Building';
   if (reason.startsWith('tractor')) return 'Machinery';
   if (reason.startsWith('harvest')) return 'Harvest';
+  if (reason.startsWith('wages')) return 'Wages';
+  if (reason.startsWith('hire')) return 'Staff';
   return 'Other';
 }
 function openLedger(): void {
@@ -602,6 +799,67 @@ function openLedger(): void {
   ).join('');
   openPanel('Finances', `<div class="row"><strong>Balance: 🪙 ${eco.balance}</strong></div><h4>By category</h4>` + sum + `<h4>Recent</h4>` + rows);
 }
+function openStaff(): void {
+  const due = wagesDue(staff);
+  let html = `<div class="row"><span>💰 Payday in ${Math.ceil(paydayTimer)}s — due ${due}🪙${unpaid ? ' · <strong>UNPAID (idle)</strong>' : ''}</span></div>`;
+  html += `<div class="row"><span>Tasks queued: collect ${taskQueue.pending('collect')} · checkout ${taskQueue.pending('checkout')} · drive ${taskQueue.pending('driveOrder')}</span></div>`;
+  html += `<h4>Hire</h4>`;
+  for (const def of Object.values(STAFF_ROLES)) {
+    const n = staff.filter((m) => m.role === def.role).length;
+    html += `<div class="row"><span>${def.icon} ${def.name} (x${n})<br><small>${def.duty} · hire ${def.hire}🪙 · wage ${def.wage}🪙/payday</small></span><button class="btn small" data-hire="${def.role}">Hire</button></div>`;
+  }
+  html += `<h4>Roster</h4>`;
+  if (staff.length === 0) html += '<p>No staff yet — hire help to serve customers automatically.</p>';
+  for (const m of staff) {
+    const def = STAFF_ROLES[m.role];
+    const status = unpaid ? 'UNPAID — idle' : m.state === 'busy' ? `busy: ${m.taskLabel}` : 'idle';
+    html += `<div class="row"><span>${def.icon} ${def.name}<br><small>${status}</small></span><button class="btn small" data-fire="${m.uid}">Dismiss</button></div>`;
+  }
+  openPanel('Staff', html);
+  panelBody.querySelectorAll<HTMLButtonElement>('[data-hire]').forEach((b) => {
+    b.onclick = () => hireStaff(b.dataset.hire as StaffRole);
+  });
+  panelBody.querySelectorAll<HTMLButtonElement>('[data-fire]').forEach((b) => {
+    b.onclick = () => dismissStaff(b.dataset.fire!);
+  });
+}
+
+async function hireStaff(role: StaffRole): Promise<void> {
+  const def = STAFF_ROLES[role];
+  if (eco.balance < def.hire) { toast(`Not enough coins (need ${def.hire}🪙)`, 'error'); beep(false); return; }
+  if (def.hire >= Balance.confirmThreshold && !(await confirmDialog(`Hire ${def.name} for ${def.hire} coins? (+${def.wage}🪙/payday)`))) return;
+  const r = eco.transact(-def.hire, `hire ${role}`);
+  if (!r.ok) { toast(r.reason ?? 'Blocked', 'error'); beep(false); return; }
+  staffSeq += 1;
+  staff.push(createStaffMember(role, staffSeq));
+  renderStaff();
+  beep(true);
+  toast(`${def.icon} ${def.name} hired!`);
+  refreshHUD();
+  scheduleSave();
+  openStaff();
+}
+
+function dismissStaff(uid: string): void {
+  const i = staff.findIndex((m) => m.uid === uid);
+  if (i === -1) return;
+  const [m] = staff.splice(i, 1);
+  // unstick any customer left mid-task: tick re-queues from a clean stage
+  if (m.current?.customerId) {
+    const c = findCustomer(m.current.customerId);
+    if (c && (c.state === 'shopping' || c.state === 'ordering')) {
+      if (m.current.kind === 'collect') c.serveStage = 'none';
+      if (m.current.kind === 'checkout') c.serveStage = 'readyCheckout';
+      if (m.current.kind === 'driveOrder') c.serveStage = 'none';
+    }
+  }
+  renderStaff();
+  toast('Staff member dismissed');
+  refreshHUD();
+  scheduleSave();
+  openStaff();
+}
+
 function openBuildMenu(): void {
   const rows = Object.values(BUILDINGS).map((d) =>
     `<div class="row"><span>${d.name} — ${d.cost}🪙</span><button class="btn small" data-build="${d.id}">Select</button></div>`,
@@ -654,6 +912,7 @@ document.querySelectorAll<HTMLButtonElement>('.crop-pick').forEach((btn) => {
 (document.getElementById('btn-storage') as HTMLButtonElement).onclick = openStorage;
 (document.getElementById('btn-farmshop') as HTMLButtonElement).onclick = openFarmShop;
 (document.getElementById('btn-customers') as HTMLButtonElement).onclick = openCustomers;
+(document.getElementById('btn-staff') as HTMLButtonElement).onclick = openStaff;
 (document.getElementById('btn-dealer') as HTMLButtonElement).onclick = openDealership;
 (document.getElementById('btn-fin') as HTMLButtonElement).onclick = openLedger;
 (document.getElementById('joy-exit') as HTMLButtonElement).onclick = () => {
@@ -852,6 +1111,12 @@ function startGame(fresh: boolean): void {
     buildingGroup.clear();
     renderTractors();
     clearCustomers();
+    staff = [];
+    taskQueue = new TaskQueue();
+    paydayTimer = Balance.paydayInterval;
+    unpaid = false;
+    staffSeq = 0;
+    renderStaff();
     plots.forEach((_, i) => refreshPlotVisual(i));
   }
   menu.classList.add('hidden');
@@ -927,6 +1192,7 @@ function animate(now: number): void {
     const dt = (now - lastTick) / 1000;
     lastTick = now;
     customersTick(dt);
+    staffTick(dt);
     let grown = false;
     for (let i = 0; i < plots.length; i++) {
       const before = plots[i].state;

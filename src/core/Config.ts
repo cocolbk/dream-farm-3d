@@ -81,4 +81,12 @@ export const Balance = {
   serveTimeout: 45, // s before unserved customer leaves
   driveAutoServe: 12, // s before drive-through auto-handoff (pre-staff fallback)
   vehicleSpeed: 5, // m/s
+  // Phase 4 — staff (P0)
+  paydayInterval: 120, // s between wage payments
+  restockThreshold: 3, // shop stock below this triggers stock-worker restock
+  restockQty: 6, // max units per restock trip
+  collectTime: 3, // s attendant spends per in-store customer
+  checkoutTime: 3, // s cashier spends per checkout
+  driveServeTime: 4, // s drive attendant spends per order
+  restockTime: 4, // s stock worker spends per restock trip
 } as const;

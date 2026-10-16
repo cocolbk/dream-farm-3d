@@ -109,7 +109,6 @@ export function buildTractorMesh(): THREE.Group {
 }
 
 export type CustomerVehicleKind = 'car' | 'van' | 'pickup';
-
 // Low-poly customer vehicles: body + cabin + wheels. Kind changes size/color.
 export function buildCustomerVehicleMesh(kind: CustomerVehicleKind): THREE.Group {
   const colors = { car: 0x5b8dd9, van: 0x66bb6a, pickup: 0xef9e3a } as const;
@@ -131,5 +130,21 @@ export function buildCustomerVehicleMesh(kind: CustomerVehicleKind): THREE.Group
     wh.castShadow = true;
     g.add(wh);
   }
+  return g;
+}
+
+// Low-poly staffer: role-colored body + head. One mesh per roster member at a fixed post.
+export function buildStaffMesh(color: number): THREE.Group {
+  const g = new THREE.Group();
+  const body = cyl(0.32, 0.4, 1.1, color);
+  body.position.y = 0.55;
+  g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), mat(0xf1c27d));
+  head.position.y = 1.35;
+  head.castShadow = true;
+  g.add(head);
+  const hat = cyl(0.3, 0.3, 0.14, Palette.wood);
+  hat.position.y = 1.6;
+  g.add(hat);
   return g;
 }

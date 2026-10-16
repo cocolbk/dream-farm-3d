@@ -8,6 +8,11 @@ export type CustomerState =
   | 'arriving' | 'toSlot' | 'parked' | 'queued'
   | 'shopping' | 'ordering' | 'served' | 'leaving' | 'gone';
 
+/** Phase 4 service pipeline stage (in-store: collect -> checkout; drive: attendant handoff). */
+export type ServeStage =
+  | 'none' | 'collectQueued' | 'collecting' | 'readyCheckout' | 'checkoutQueued'
+  | 'checking' | 'driveQueued' | 'driving';
+
 export interface OrderItem { crop: CropId; qty: number; }
 
 export interface Customer {
@@ -19,6 +24,7 @@ export interface Customer {
   slot: number; // parking bay or queue index, -1 if none
   wait: number; // s spent waiting for service
   reason: string; // last status / leave reason
+  serveStage: ServeStage; // Phase 4 staff pipeline stage
   waypoints: Array<{ x: number; z: number }>;
   wpIndex: number;
   x: number;
@@ -131,7 +137,7 @@ export function spawnCustomer(
   const dest = mode === 'instore' ? ROUTE.bays[slot] : ROUTE.queue[slot];
   return {
     id, mode, items: req.items, budget: req.budget,
-    state: 'arriving', slot, wait: 0, reason: 'Arriving',
+    state: 'arriving', slot, wait: 0, reason: 'Arriving', serveStage: 'none',
     waypoints: [ROUTE.entrance, ROUTE.junctionIn, ROUTE.approach, dest],
     wpIndex: 0, x: ROUTE.entrance.x, z: ROUTE.entrance.z,
   };
